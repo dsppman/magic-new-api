@@ -3675,6 +3675,12 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "自动生成渠道": "Génération automatique de canaux",
+    "随机已用额度": "Quota utilisé aléatoire",
+    "生成渠道": "Générer des canaux",
+    "生成渠道失败": "Échec de la génération des canaux",
+    "渠道已生成": "Canaux générés",
+    "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "Dernière génération : ${count} au total, ${enabled} activés, ${autoDisabled} désactivés automatiquement"
   }
 }

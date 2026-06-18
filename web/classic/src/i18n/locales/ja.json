@@ -3644,6 +3644,12 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "自动生成渠道": "チャネル自動生成",
+    "随机已用额度": "使用済みクォータをランダム化",
+    "生成渠道": "チャネルを生成",
+    "生成渠道失败": "チャネルの生成に失敗しました",
+    "渠道已生成": "チャネルを生成しました",
+    "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "直近の生成: 合計 ${count} 件、有効 ${enabled} 件、自動無効 ${autoDisabled} 件"
   }
 }

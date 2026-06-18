@@ -4209,6 +4209,12 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "自动生成渠道": "Tự động tạo kênh",
+    "随机已用额度": "Ngẫu nhiên hạn mức đã dùng",
+    "生成渠道": "Tạo kênh",
+    "生成渠道失败": "Tạo kênh thất bại",
+    "渠道已生成": "Đã tạo kênh",
+    "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "Lần tạo gần nhất: tổng ${count}, bật ${enabled}, tự động tắt ${autoDisabled}"
   }
 }

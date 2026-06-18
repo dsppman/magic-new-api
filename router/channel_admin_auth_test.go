@@ -90,6 +90,7 @@ func TestAdminCannotOperateChannels(t *testing.T) {
 		{name: "manage multi keys", method: http.MethodPost, path: "/api/channel/multi_key/manage"},
 		{name: "apply upstream updates", method: http.MethodPost, path: "/api/channel/upstream_updates/apply"},
 		{name: "detect upstream updates", method: http.MethodPost, path: "/api/channel/upstream_updates/detect"},
+		{name: "generate auto channels", method: http.MethodPost, path: "/api/option/channel_auto_generate"},
 	}
 
 	for _, tt := range tests {
