@@ -140,7 +140,7 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 	group := normalizeGroup(options.Group, options.Groups)
 
 	rng := rand.New(rand.NewSource(options.Seed))
-	statuses := buildStatuses(options.Count, rng)
+	statuses := buildStatuses(options.Count, rng, options.RandomUsedQuota)
 	emails := make(map[string]struct{}, options.Count)
 	settings, err := vertexJSONSettings()
 	if err != nil {
@@ -274,7 +274,15 @@ func pickModels(rng *rand.Rand, models []string) string {
 	return strings.Join(modelSets[rng.Intn(len(modelSets))], ",")
 }
 
-func buildStatuses(count int, rng *rand.Rand) []int {
+func buildStatuses(count int, rng *rand.Rand, random bool) []int {
+	if !random {
+		statuses := make([]int, count)
+		for i := 0; i < count; i++ {
+			statuses[i] = common.ChannelStatusEnabled
+		}
+		return statuses
+	}
+
 	enabled := int(math.Round(float64(count) * 1020 / 3100))
 	statuses := make([]int, count)
 	for i := 0; i < count; i++ {

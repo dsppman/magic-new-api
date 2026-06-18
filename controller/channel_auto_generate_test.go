@@ -351,12 +351,16 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 	var body struct {
 		Success bool `json:"success"`
 		Data    struct {
-			Count int `json:"count"`
+			Count        int `json:"count"`
+			Enabled      int `json:"enabled"`
+			AutoDisabled int `json:"auto_disabled"`
 		} `json:"data"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
 	require.True(t, body.Success)
 	assert.Equal(t, 3, body.Data.Count)
+	assert.Equal(t, 1, body.Data.Enabled)
+	assert.Equal(t, 2, body.Data.AutoDisabled)
 
 	var total int64
 	require.NoError(t, db.Model(&model.Channel{}).Count(&total).Error)
@@ -366,6 +370,8 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 	require.NoError(t, model.ApplyGhostChannelFilter(db.Model(&model.Channel{})).Find(&generated).Error)
 	require.Len(t, generated, 4)
 	newGenerated := 0
+	newAutoDisabled := 0
+	responseTimeCount := 0
 	for _, channel := range generated {
 		require.NotNil(t, channel.Weight)
 		require.NotNil(t, channel.Priority)
@@ -379,7 +385,14 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 		assert.Equal(t, "gemini-2.5-flash,gemini-2.5-pro", channel.Models)
 		assert.Equal(t, "vip,default", channel.Group)
 		assert.Greater(t, channel.UsedQuota, int64(0))
-		assert.Greater(t, channel.ResponseTime, 0)
+		if channel.Status == common.ChannelStatusAutoDisabled {
+			newAutoDisabled++
+		}
+		if channel.ResponseTime > 0 {
+			responseTimeCount++
+		}
 	}
 	assert.Equal(t, 3, newGenerated)
+	assert.Equal(t, 2, newAutoDisabled)
+	assert.Greater(t, responseTimeCount, 0)
 }

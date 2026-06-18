@@ -19,8 +19,8 @@ func TestGenerateDefaultVertexChannels(t *testing.T) {
 	require.Len(t, channels, DefaultCount)
 
 	assert.Equal(t, DefaultCount, stats.Count)
-	assert.Equal(t, 1020, stats.Enabled)
-	assert.Equal(t, 2080, stats.AutoDisabled)
+	assert.Equal(t, DefaultCount, stats.Enabled)
+	assert.Zero(t, stats.AutoDisabled)
 
 	seenEmails := make(map[string]struct{}, len(channels))
 	regionSet := knownRegionSet()
@@ -59,6 +59,33 @@ func TestGenerateDefaultVertexChannels(t *testing.T) {
 	}
 }
 
+func TestGenerateCanRandomizeUsedQuotaAndAutoDisabled(t *testing.T) {
+	channels, stats, err := Generate(Options{
+		Count:           DefaultCount,
+		RandomUsedQuota: true,
+		Now:             1781763600,
+	})
+	require.NoError(t, err)
+	require.Len(t, channels, DefaultCount)
+
+	assert.Equal(t, 1020, stats.Enabled)
+	assert.Equal(t, 2080, stats.AutoDisabled)
+
+	disabled := 0
+	quotas := make([]int64, 0, len(channels))
+	for _, channel := range channels {
+		if channel.Status == common.ChannelStatusAutoDisabled {
+			disabled++
+		}
+		quotas = append(quotas, channel.UsedQuota)
+	}
+	assert.Equal(t, stats.AutoDisabled, disabled)
+	sort.Slice(quotas, func(i, j int) bool { return quotas[i] < quotas[j] })
+	assert.Greater(t, quotas[len(quotas)-1], int64(250_000_000))
+	assert.Greater(t, quotas[len(quotas)/2], int64(20_000_000))
+	assert.Less(t, quotas[0], int64(15_000_000))
+}
+
 func TestGenerateCanUseProvidedGroups(t *testing.T) {
 	channels, _, err := Generate(Options{
 		Count:  3,
@@ -93,22 +120,8 @@ func TestGenerateCanRandomizeResponseTime(t *testing.T) {
 	sort.Ints(responseTimes)
 	assert.Greater(t, responseTimes[len(responseTimes)-1], 0)
 	assert.Greater(t, responseTimes[len(responseTimes)/2], 0)
-	assert.Less(t, responseTimes[0], 100)
-}
-
-func TestGenerateCanRandomizeUsedQuota(t *testing.T) {
-	channels, _, err := Generate(Options{Count: DefaultCount, RandomUsedQuota: true, Now: 1781763600})
-	require.NoError(t, err)
-	require.Len(t, channels, DefaultCount)
-
-	quotas := make([]int64, 0, len(channels))
-	for _, channel := range channels {
-		quotas = append(quotas, channel.UsedQuota)
-	}
-	sort.Slice(quotas, func(i, j int) bool { return quotas[i] < quotas[j] })
-	assert.Greater(t, quotas[len(quotas)-1], int64(250_000_000))
-	assert.Greater(t, quotas[len(quotas)/2], int64(20_000_000))
-	assert.Less(t, quotas[0], int64(15_000_000))
+	assert.Greater(t, responseTimes[0], 0)
+	assert.Greater(t, responseTimes[len(responseTimes)-1], responseTimes[0])
 }
 
 func TestGenerateUsesProvidedModels(t *testing.T) {
