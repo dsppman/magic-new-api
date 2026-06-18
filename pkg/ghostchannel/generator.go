@@ -303,14 +303,7 @@ func otherJSON(region string) (string, error) {
 func statusInfoJSON(rng *rand.Rand, status int, now int64) (string, error) {
 	reason := ""
 	if status != common.ChannelStatusEnabled {
-		projectNumber := 100000000000 + rng.Int63n(900000000000)
-		reasons := []string{
-			fmt.Sprintf("Consumer 'project_number:%d' has been suspended. See https://cloud.google.com/billing/docs/how-to/suspended for more information.", projectNumber),
-			fmt.Sprintf("status_code=403, bad response status code 403, body: Permission denied: Consumer 'projects/gemini-ent-%06d' has been suspended.", 100000+rng.Intn(900000)),
-			"quota exceeded for quota metric 'Generate Content requests' and limit 'Generate content requests per minute'",
-			"permission denied while refreshing Vertex AI project credentials",
-		}
-		reason = reasons[rng.Intn(len(reasons))]
+		reason = RandomStatusReason(rng)
 	}
 	bytes, err := common.Marshal(map[string]any{
 		"status_reason": reason,
@@ -320,6 +313,20 @@ func statusInfoJSON(rng *rand.Rand, status int, now int64) (string, error) {
 		return "", err
 	}
 	return string(bytes), nil
+}
+
+func RandomStatusReason(rng *rand.Rand) string {
+	if rng == nil {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+	projectNumber := 100000000000 + rng.Int63n(900000000000)
+	reasons := []string{
+		fmt.Sprintf("Consumer 'project_number:%d' has been suspended. See https://cloud.google.com/billing/docs/how-to/suspended for more information.", projectNumber),
+		fmt.Sprintf("status_code=403, bad response status code 403, body: Permission denied: Consumer 'projects/gemini-ent-%06d' has been suspended.", 100000+rng.Intn(900000)),
+		"quota exceeded for quota metric 'Generate Content requests' and limit 'Generate content requests per minute'",
+		"permission denied while refreshing Vertex AI project credentials",
+	}
+	return reasons[rng.Intn(len(reasons))]
 }
 
 func responseTime(rng *rand.Rand, status int, random bool) int {

@@ -396,3 +396,118 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 	assert.Equal(t, 2, newAutoDisabled)
 	assert.Greater(t, responseTimeCount, 0)
 }
+
+func TestRandomDisableGhostChannelsUpdatesEnabledGhostChannels(t *testing.T) {
+	db := setupAutoChannelControllerTestDB(t)
+
+	normalWeight := uint(100)
+	normalPriority := int64(100)
+	ghostWeight := uint(model.GhostChannelMarker)
+	ghostPriority := int64(model.GhostChannelMarker)
+	autoBan := 1
+
+	require.NoError(t, db.Create(&model.Channel{
+		Type:     constant.ChannelTypeOpenAI,
+		Key:      "real-secret",
+		Status:   common.ChannelStatusEnabled,
+		Name:     "real-upstream",
+		Weight:   &normalWeight,
+		Priority: &normalPriority,
+		AutoBan:  &autoBan,
+		Models:   "gpt-4o",
+		Group:    "real",
+	}).Error)
+	for i := 0; i < 5; i++ {
+		require.NoError(t, db.Create(&model.Channel{
+			Type:     constant.ChannelTypeVertexAi,
+			Key:      fmt.Sprintf("generated-secret-%d", i),
+			Status:   common.ChannelStatusEnabled,
+			Name:     fmt.Sprintf("generated-%d@gmail.com", i),
+			Weight:   &ghostWeight,
+			Priority: &ghostPriority,
+			AutoBan:  &autoBan,
+			Models:   "gemini-2.5-flash",
+			Group:    "Gemini",
+		}).Error)
+	}
+	require.NoError(t, db.Create(&model.Channel{
+		Type:      constant.ChannelTypeVertexAi,
+		Key:       "old-disabled",
+		Status:    common.ChannelStatusAutoDisabled,
+		Name:      "old.disabled@gmail.com",
+		Weight:    &ghostWeight,
+		Priority:  &ghostPriority,
+		AutoBan:   &autoBan,
+		Models:    "gemini-2.5-flash",
+		Group:     "Gemini",
+		OtherInfo: `{"status_reason":"old","status_time":1}`,
+	}).Error)
+
+	reqBody, err := common.Marshal(map[string]any{"count": 3})
+	require.NoError(t, err)
+
+	before := common.GetTimestamp()
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/option/channel_random_auto_disable", bytes.NewReader(reqBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", 1)
+	ctx.Set("username", "root")
+	ctx.Set("role", common.RoleRootUser)
+
+	RandomDisableGhostChannels(ctx)
+	after := common.GetTimestamp()
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var body struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Requested  int   `json:"requested"`
+			Available  int   `json:"available"`
+			Disabled   int   `json:"disabled"`
+			StatusTime int64 `json:"status_time"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
+	require.True(t, body.Success)
+	assert.Equal(t, 3, body.Data.Requested)
+	assert.Equal(t, 5, body.Data.Available)
+	assert.Equal(t, 3, body.Data.Disabled)
+	assert.GreaterOrEqual(t, body.Data.StatusTime, before)
+	assert.LessOrEqual(t, body.Data.StatusTime, after)
+
+	var real model.Channel
+	require.NoError(t, db.Where("name = ?", "real-upstream").First(&real).Error)
+	assert.Equal(t, common.ChannelStatusEnabled, real.Status)
+
+	var ghosts []model.Channel
+	require.NoError(t, model.ApplyGhostChannelFilter(db.Model(&model.Channel{})).Find(&ghosts).Error)
+	require.Len(t, ghosts, 6)
+
+	newlyDisabled := 0
+	enabled := 0
+	for _, channel := range ghosts {
+		if channel.Name == "old.disabled@gmail.com" {
+			assert.Equal(t, common.ChannelStatusAutoDisabled, channel.Status)
+			assert.Equal(t, "old", channel.GetOtherInfo()["status_reason"])
+			continue
+		}
+		switch channel.Status {
+		case common.ChannelStatusEnabled:
+			enabled++
+		case common.ChannelStatusAutoDisabled:
+			newlyDisabled++
+			info := channel.GetOtherInfo()
+			reason, ok := info["status_reason"].(string)
+			require.True(t, ok)
+			assert.NotEmpty(t, reason)
+			statusTime, ok := info["status_time"].(float64)
+			require.True(t, ok)
+			assert.Equal(t, body.Data.StatusTime, int64(statusTime))
+		default:
+			t.Fatalf("unexpected ghost channel status %d", channel.Status)
+		}
+	}
+	assert.Equal(t, 3, newlyDisabled)
+	assert.Equal(t, 2, enabled)
+}

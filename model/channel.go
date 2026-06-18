@@ -808,6 +808,35 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	return true
 }
 
+func UpdateChannelStatusWithTimestamp(channelId int, status int, reason string, statusTime int64) bool {
+	if statusTime == 0 {
+		statusTime = common.GetTimestamp()
+	}
+	channel, err := GetChannelById(channelId, true)
+	if err != nil {
+		return false
+	}
+	if channel.Status == status {
+		return false
+	}
+
+	info := channel.GetOtherInfo()
+	info["status_reason"] = reason
+	info["status_time"] = statusTime
+	channel.SetOtherInfo(info)
+	channel.Status = status
+	if err := channel.SaveWithoutKey(); err != nil {
+		common.SysLog(fmt.Sprintf("failed to update channel status with timestamp: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
+		return false
+	}
+
+	CacheUpdateChannelStatus(channelId, status)
+	if err := UpdateAbilityStatus(channelId, status == common.ChannelStatusEnabled); err != nil {
+		common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
+	}
+	return true
+}
+
 func EnableChannelByTag(tag string) error {
 	err := DB.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error
 	if err != nil {

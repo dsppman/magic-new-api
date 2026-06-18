@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"math/rand"
 	"net/http"
 	"time"
 
@@ -19,6 +20,10 @@ type GenerateGhostChannelsRequest struct {
 	Groups             []string `json:"groups"`
 	RandomUsedQuota    bool     `json:"random_used_quota"`
 	RandomResponseTime bool     `json:"random_response_time"`
+}
+
+type RandomDisableGhostChannelsRequest struct {
+	Count int `json:"count"`
 }
 
 func GenerateGhostChannels(c *gin.Context) {
@@ -78,6 +83,66 @@ func GenerateGhostChannels(c *gin.Context) {
 			"count":         stats.Count,
 			"enabled":       stats.Enabled,
 			"auto_disabled": stats.AutoDisabled,
+		},
+	})
+}
+
+func RandomDisableGhostChannels(c *gin.Context) {
+	req := RandomDisableGhostChannelsRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if req.Count <= 0 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "随机自动禁用数量必须大于 0"})
+		return
+	}
+	if req.Count > 50000 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "单次最多随机自动禁用 50000 条"})
+		return
+	}
+
+	var channelIds []int
+	if err := model.ApplyGhostChannelFilter(model.DB.Model(&model.Channel{})).
+		Where("status = ?", common.ChannelStatusEnabled).
+		Pluck("id", &channelIds).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rng.Shuffle(len(channelIds), func(i, j int) {
+		channelIds[i], channelIds[j] = channelIds[j], channelIds[i]
+	})
+
+	limit := req.Count
+	if limit > len(channelIds) {
+		limit = len(channelIds)
+	}
+	statusTime := common.GetTimestamp()
+	disabled := 0
+	for _, channelId := range channelIds[:limit] {
+		reason := ghostchannel.RandomStatusReason(rng)
+		if model.UpdateChannelStatusWithTimestamp(channelId, common.ChannelStatusAutoDisabled, reason, statusTime) {
+			disabled++
+		}
+	}
+
+	recordManageAudit(c, "channel.random_auto_disable", map[string]interface{}{
+		"requested":   req.Count,
+		"available":   len(channelIds),
+		"disabled":    disabled,
+		"status_time": statusTime,
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"requested":   req.Count,
+			"available":   len(channelIds),
+			"disabled":    disabled,
+			"status_time": statusTime,
 		},
 	})
 }

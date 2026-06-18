@@ -3677,11 +3677,17 @@
     "，": ", ",
     "、": ", ",
     "自动生成渠道": "Génération automatique de canaux",
+    "随机自动禁用": "Désactivation automatique aléatoire",
+    "随机自动禁用数量": "Nombre à désactiver automatiquement",
+    "随机自动禁用数量必须大于0": "Le nombre à désactiver automatiquement doit être supérieur à 0",
+    "随机自动禁用失败": "Échec de la désactivation automatique aléatoire",
     "随机已用额度": "Quota utilisé aléatoire",
     "随机响应时间": "Temps de réponse aléatoire",
     "生成渠道": "Générer des canaux",
     "生成渠道失败": "Échec de la génération des canaux",
     "渠道已生成": "Canaux générés",
+    "已随机自动禁用 ${count} 个影子渠道": "${count} canaux fantômes désactivés automatiquement",
+    "最近自动禁用：请求 ${requested} 个，可用 ${available} 个，已禁用 ${disabled} 个": "Dernière désactivation auto : ${requested} demandés, ${available} disponibles, ${disabled} désactivés",
     "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "Dernière génération : ${count} au total, ${enabled} activés, ${autoDisabled} désactivés automatiquement"
   }
 }

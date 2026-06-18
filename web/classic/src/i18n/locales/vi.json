@@ -4211,11 +4211,17 @@
     "，": ", ",
     "、": ", ",
     "自动生成渠道": "Tự động tạo kênh",
+    "随机自动禁用": "Tự động tắt ngẫu nhiên",
+    "随机自动禁用数量": "Số lượng tự động tắt ngẫu nhiên",
+    "随机自动禁用数量必须大于0": "Số lượng tự động tắt ngẫu nhiên phải lớn hơn 0",
+    "随机自动禁用失败": "Tự động tắt ngẫu nhiên thất bại",
     "随机已用额度": "Ngẫu nhiên hạn mức đã dùng",
     "随机响应时间": "Thời gian phản hồi ngẫu nhiên",
     "生成渠道": "Tạo kênh",
     "生成渠道失败": "Tạo kênh thất bại",
     "渠道已生成": "Đã tạo kênh",
+    "已随机自动禁用 ${count} 个影子渠道": "Đã tự động tắt ngẫu nhiên ${count} kênh bóng",
+    "最近自动禁用：请求 ${requested} 个，可用 ${available} 个，已禁用 ${disabled} 个": "Lần tự động tắt gần nhất: yêu cầu ${requested}, khả dụng ${available}, đã tắt ${disabled}",
     "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "Lần tạo gần nhất: tổng ${count}, bật ${enabled}, tự động tắt ${autoDisabled}"
   }
 }

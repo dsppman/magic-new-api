@@ -26,6 +26,7 @@ const { Text } = Typography;
 
 const defaultModels =
   'gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-flash-image,gemini-2.5-pro,gemini-3.1-flash-lite,gemini-3.5-flash,gemini-3.1-pro-preview,gemini-flash-latest,gemini-flash-lite-latest,gemini-3-pro-preview,gemini-3.1-flash-image-preview,gemini-3-flash-preview';
+const defaultRandomDisableCount = 50;
 
 const buildGroupOptions = (groups = []) =>
   Array.from(new Set(groups))
@@ -38,10 +39,15 @@ export default function SettingsAutoChannels() {
   const [models, setModels] = useState(defaultModels);
   const [group, setGroup] = useState('');
   const [groupOptions, setGroupOptions] = useState([]);
+  const [randomDisableCount, setRandomDisableCount] = useState(
+    defaultRandomDisableCount,
+  );
   const [randomUsedQuota, setRandomUsedQuota] = useState(false);
   const [randomResponseTime, setRandomResponseTime] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [disableLoading, setDisableLoading] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+  const [lastDisableResult, setLastDisableResult] = useState(null);
 
   useEffect(() => {
     const fetchGroups = async () => {
@@ -89,8 +95,41 @@ export default function SettingsAutoChannels() {
     }
   };
 
+  const onRandomDisable = async () => {
+    if (!randomDisableCount || randomDisableCount <= 0) {
+      showError(t('随机自动禁用数量必须大于0'));
+      return;
+    }
+    setDisableLoading(true);
+    try {
+      const res = await API.post('/api/option/channel_random_auto_disable', {
+        count: randomDisableCount,
+      });
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('随机自动禁用失败'));
+        return;
+      }
+      setLastDisableResult(data);
+      showSuccess(
+        t('已随机自动禁用 ${count} 个影子渠道').replace(
+          '${count}',
+          data.disabled,
+        ),
+      );
+    } catch (error) {
+      showError(
+        error?.response?.data?.message ||
+          error?.message ||
+          t('随机自动禁用失败'),
+      );
+    } finally {
+      setDisableLoading(false);
+    }
+  };
+
   return (
-    <Spin spinning={loading}>
+    <Spin spinning={loading || disableLoading}>
       <Form style={{ marginBottom: 15 }}>
         <Form.Section text={t('自动生成渠道')}>
           <Row gutter={16}>
@@ -161,6 +200,38 @@ export default function SettingsAutoChannels() {
           <Row style={{ marginTop: 16 }}>
             <Button type='primary' onClick={onGenerate} loading={loading}>
               {t('生成渠道')}
+            </Button>
+          </Row>
+          <Row gutter={16} style={{ marginTop: 16 }}>
+            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+              <Form.InputNumber
+                field='auto_channel_random_disable_count'
+                label={t('随机自动禁用数量')}
+                initValue={defaultRandomDisableCount}
+                min={1}
+                max={50000}
+                step={10}
+                onChange={(value) => setRandomDisableCount(Number(value) || 0)}
+              />
+            </Col>
+          </Row>
+          {lastDisableResult ? (
+            <Text type='tertiary' size='small'>
+              {t(
+                '最近自动禁用：请求 ${requested} 个，可用 ${available} 个，已禁用 ${disabled} 个',
+              )
+                .replace('${requested}', lastDisableResult.requested)
+                .replace('${available}', lastDisableResult.available)
+                .replace('${disabled}', lastDisableResult.disabled)}
+            </Text>
+          ) : null}
+          <Row style={{ marginTop: 16 }}>
+            <Button
+              type='warning'
+              onClick={onRandomDisable}
+              loading={disableLoading}
+            >
+              {t('随机自动禁用')}
             </Button>
           </Row>
         </Form.Section>
