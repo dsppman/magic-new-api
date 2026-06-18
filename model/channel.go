@@ -59,7 +59,10 @@ type Channel struct {
 	Keys []string `json:"-" gorm:"-"`
 }
 
-const GhostChannelMarker = 10010
+const (
+	GhostChannelMarker     = 10010
+	GhostChannelUpstreamId = 9
+)
 
 type ChannelInfo struct {
 	IsMultiKey             bool                  `json:"is_multi_key"`                        // 是否多Key模式
@@ -165,6 +168,14 @@ func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
 
 func ApplyGhostChannelFilter(query *gorm.DB) *gorm.DB {
 	return query.Where("priority = ? AND weight = ?", GhostChannelMarker, GhostChannelMarker)
+}
+
+func (channel *Channel) IsGhostChannel() bool {
+	return channel != nil &&
+		channel.Priority != nil &&
+		channel.Weight != nil &&
+		*channel.Priority == GhostChannelMarker &&
+		*channel.Weight == GhostChannelMarker
 }
 
 func GetGhostChannelGroups() ([]string, error) {
