@@ -6,20 +6,20 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/pkg/channelautogen"
+	"github.com/QuantumNous/new-api/pkg/ghostchannel"
 
 	"github.com/gin-gonic/gin"
 )
 
-type GenerateAutoChannelsRequest struct {
+type GenerateGhostChannelsRequest struct {
 	Count           int    `json:"count"`
 	Seed            *int64 `json:"seed"`
 	Models          string `json:"models"`
 	RandomUsedQuota bool   `json:"random_used_quota"`
 }
 
-func GenerateAutoChannels(c *gin.Context) {
-	req := GenerateAutoChannelsRequest{}
+func GenerateGhostChannels(c *gin.Context) {
+	req := GenerateGhostChannelsRequest{}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiError(c, err)
 		return
@@ -38,10 +38,10 @@ func GenerateAutoChannels(c *gin.Context) {
 		seed = *req.Seed
 	}
 
-	channels, stats, err := channelautogen.Generate(channelautogen.Options{
+	channels, stats, err := ghostchannel.Generate(ghostchannel.Options{
 		Count:           req.Count,
 		Seed:            seed,
-		Tag:             channelautogen.DefaultTag,
+		Tag:             ghostchannel.DefaultTag,
 		Models:          req.Models,
 		RandomUsedQuota: req.RandomUsedQuota,
 	})

@@ -122,6 +122,10 @@ func TestAdminCannotReadNonChannelManagementRoutes(t *testing.T) {
 		name string
 		path string
 	}{
+		{name: "all logs", path: "/api/log/"},
+		{name: "all log stats", path: "/api/log/stat"},
+		{name: "all quota data", path: "/api/data/"},
+		{name: "user quota data ranking", path: "/api/data/users"},
 		{name: "prefill groups", path: "/api/prefill_group?type=model"},
 	}
 
