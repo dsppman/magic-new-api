@@ -101,12 +101,26 @@ func TestAdminCannotOperateChannels(t *testing.T) {
 	}
 }
 
+func TestAdminCanReadChannelGroupList(t *testing.T) {
+	recorder := performAPIRouterRequestAsRole(t, http.MethodGet, "/api/group/", common.RoleAdminUser)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var body struct {
+		Success bool     `json:"success"`
+		Message string   `json:"message"`
+		Data    []string `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
+	assert.True(t, body.Success)
+	assert.NotNil(t, body.Data)
+}
+
 func TestAdminCannotReadNonChannelManagementRoutes(t *testing.T) {
 	tests := []struct {
 		name string
 		path string
 	}{
-		{name: "groups", path: "/api/group/"},
 		{name: "prefill groups", path: "/api/prefill_group?type=model"},
 	}
 
