@@ -12,10 +12,13 @@ import (
 )
 
 type GenerateGhostChannelsRequest struct {
-	Count           int    `json:"count"`
-	Seed            *int64 `json:"seed"`
-	Models          string `json:"models"`
-	RandomUsedQuota bool   `json:"random_used_quota"`
+	Count              int      `json:"count"`
+	Seed               *int64   `json:"seed"`
+	Models             string   `json:"models"`
+	Group              string   `json:"group"`
+	Groups             []string `json:"groups"`
+	RandomUsedQuota    bool     `json:"random_used_quota"`
+	RandomResponseTime bool     `json:"random_response_time"`
 }
 
 func GenerateGhostChannels(c *gin.Context) {
@@ -39,11 +42,14 @@ func GenerateGhostChannels(c *gin.Context) {
 	}
 
 	channels, stats, err := ghostchannel.Generate(ghostchannel.Options{
-		Count:           req.Count,
-		Seed:            seed,
-		Tag:             ghostchannel.DefaultTag,
-		Models:          req.Models,
-		RandomUsedQuota: req.RandomUsedQuota,
+		Count:              req.Count,
+		Seed:               seed,
+		Tag:                ghostchannel.DefaultTag,
+		Models:             req.Models,
+		Group:              req.Group,
+		Groups:             req.Groups,
+		RandomUsedQuota:    req.RandomUsedQuota,
+		RandomResponseTime: req.RandomResponseTime,
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -56,9 +62,13 @@ func GenerateGhostChannels(c *gin.Context) {
 	model.InitChannelCache()
 
 	recordManageAudit(c, "channel.auto_generate", map[string]interface{}{
-		"count":         stats.Count,
-		"enabled":       stats.Enabled,
-		"auto_disabled": stats.AutoDisabled,
+		"count":                stats.Count,
+		"enabled":              stats.Enabled,
+		"auto_disabled":        stats.AutoDisabled,
+		"group":                req.Group,
+		"groups":               req.Groups,
+		"random_used_quota":    req.RandomUsedQuota,
+		"random_response_time": req.RandomResponseTime,
 	})
 
 	c.JSON(http.StatusOK, gin.H{

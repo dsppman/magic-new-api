@@ -328,10 +328,12 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 	}).Error)
 
 	reqBody, err := common.Marshal(map[string]any{
-		"count":             3,
-		"seed":              int64(123),
-		"models":            "gemini-2.5-flash,gemini-2.5-pro",
-		"random_used_quota": true,
+		"count":                3,
+		"seed":                 int64(123),
+		"models":               "gemini-2.5-flash,gemini-2.5-pro",
+		"groups":               []string{"vip", "default"},
+		"random_used_quota":    true,
+		"random_response_time": true,
 	})
 	require.NoError(t, err)
 
@@ -375,7 +377,9 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 		newGenerated++
 		assert.Contains(t, channel.Name, "@gmail.com")
 		assert.Equal(t, "gemini-2.5-flash,gemini-2.5-pro", channel.Models)
+		assert.Equal(t, "vip,default", channel.Group)
 		assert.Greater(t, channel.UsedQuota, int64(0))
+		assert.Greater(t, channel.ResponseTime, 0)
 	}
 	assert.Equal(t, 3, newGenerated)
 }

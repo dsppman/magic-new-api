@@ -21,12 +21,15 @@ const (
 )
 
 type Options struct {
-	Count           int
-	Seed            int64
-	Tag             string
-	Now             int64
-	Models          string
-	RandomUsedQuota bool
+	Count              int
+	Seed               int64
+	Tag                string
+	Now                int64
+	Models             string
+	Group              string
+	Groups             []string
+	RandomUsedQuota    bool
+	RandomResponseTime bool
 }
 
 type Stats struct {
@@ -134,6 +137,7 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 		options.Now = time.Now().Unix()
 	}
 	models := normalizeModels(options.Models)
+	group := normalizeGroup(options.Group, options.Groups)
 
 	rng := rand.New(rand.NewSource(options.Seed))
 	statuses := buildStatuses(options.Count, rng)
@@ -182,13 +186,13 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 			Weight:             &weight,
 			CreatedTime:        createdAt,
 			TestTime:           testAt,
-			ResponseTime:       randomResponseTime(rng, status),
+			ResponseTime:       responseTime(rng, status, options.RandomResponseTime),
 			BaseURL:            nil,
 			Other:              other,
 			Balance:            0,
 			BalanceUpdatedTime: 0,
 			Models:             pickModels(rng, models),
-			Group:              "Gemini",
+			Group:              group,
 			UsedQuota:          usedQuota(rng, options.RandomUsedQuota),
 			ModelMapping:       nil,
 			StatusCodeMapping:  nil,
@@ -212,6 +216,35 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 	}
 
 	return channels, stats, nil
+}
+
+func normalizeGroup(group string, groups []string) string {
+	parts := make([]string, 0, len(groups)+1)
+	if len(groups) > 0 {
+		parts = append(parts, groups...)
+	} else {
+		parts = strings.FieldsFunc(group, func(r rune) bool {
+			return r == ',' || r == '\n' || r == '\r' || r == '\t'
+		})
+	}
+
+	result := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		groupName := strings.TrimSpace(part)
+		if groupName == "" {
+			continue
+		}
+		if _, ok := seen[groupName]; ok {
+			continue
+		}
+		seen[groupName] = struct{}{}
+		result = append(result, groupName)
+	}
+	if len(result) == 0 {
+		return "Gemini"
+	}
+	return strings.Join(result, ",")
 }
 
 func normalizeModels(models string) []string {
@@ -293,6 +326,13 @@ func statusInfoJSON(rng *rand.Rand, status int, now int64) (string, error) {
 		return "", err
 	}
 	return string(bytes), nil
+}
+
+func responseTime(rng *rand.Rand, status int, random bool) int {
+	if !random {
+		return 0
+	}
+	return randomResponseTime(rng, status)
 }
 
 func randomResponseTime(rng *rand.Rand, status int) int {

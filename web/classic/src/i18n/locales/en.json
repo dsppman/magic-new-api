@@ -3824,6 +3824,7 @@
     "、": ", ",
     "自动生成渠道": "Auto-generate channels",
     "随机已用额度": "Random used quota",
+    "随机响应时间": "Random response time",
     "生成渠道": "Generate channels",
     "生成渠道失败": "Failed to generate channels",
     "渠道已生成": "Channels generated",

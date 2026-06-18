@@ -32,6 +32,7 @@ func TestGenerateDefaultVertexChannels(t *testing.T) {
 		require.NotNil(t, channel.Priority)
 		assert.Equal(t, uint(model.GhostChannelMarker), *channel.Weight)
 		assert.Equal(t, int64(model.GhostChannelMarker), *channel.Priority)
+		assert.Zero(t, channel.ResponseTime)
 		assert.Zero(t, channel.UsedQuota)
 		assert.Equal(t, DefaultTag, *channel.Tag)
 		assert.Contains(t, channel.Name, "@gmail.com")
@@ -56,6 +57,43 @@ func TestGenerateDefaultVertexChannels(t *testing.T) {
 		assert.Equal(t, "json", settings["vertex_key_type"])
 		assert.NotEmpty(t, strings.Split(channel.Models, ","))
 	}
+}
+
+func TestGenerateCanUseProvidedGroups(t *testing.T) {
+	channels, _, err := Generate(Options{
+		Count:  3,
+		Groups: []string{"vip", "default", "vip", ""},
+		Now:    1781763600,
+	})
+	require.NoError(t, err)
+	require.Len(t, channels, 3)
+	for _, channel := range channels {
+		assert.Equal(t, "vip,default", channel.Group)
+	}
+
+	channels, _, err = Generate(Options{
+		Count: 1,
+		Group: "vip, default",
+		Now:   1781763600,
+	})
+	require.NoError(t, err)
+	require.Len(t, channels, 1)
+	assert.Equal(t, "vip,default", channels[0].Group)
+}
+
+func TestGenerateCanRandomizeResponseTime(t *testing.T) {
+	channels, _, err := Generate(Options{Count: DefaultCount, RandomResponseTime: true, Now: 1781763600})
+	require.NoError(t, err)
+	require.Len(t, channels, DefaultCount)
+
+	responseTimes := make([]int, 0, len(channels))
+	for _, channel := range channels {
+		responseTimes = append(responseTimes, channel.ResponseTime)
+	}
+	sort.Ints(responseTimes)
+	assert.Greater(t, responseTimes[len(responseTimes)-1], 0)
+	assert.Greater(t, responseTimes[len(responseTimes)/2], 0)
+	assert.Less(t, responseTimes[0], 100)
 }
 
 func TestGenerateCanRandomizeUsedQuota(t *testing.T) {
