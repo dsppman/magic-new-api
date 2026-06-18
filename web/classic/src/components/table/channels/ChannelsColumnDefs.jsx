@@ -38,6 +38,7 @@ import {
   showSuccess,
   showError,
   showInfo,
+  isRoot,
 } from '../../../helpers';
 import {
   CHANNEL_OPTIONS,
@@ -328,6 +329,8 @@ export const getChannelsColumns = ({
   openUpstreamUpdateModal,
   detectChannelUpstreamUpdates,
 }) => {
+  const canOperateChannel = isRoot();
+
   return [
     {
       key: COLUMN_KEYS.ID,
@@ -775,44 +778,47 @@ export const getChannelsColumns = ({
 
           return (
             <Space wrap>
-              <SplitButtonGroup
-                className='overflow-hidden'
-                aria-label={t('测试单个渠道操作项目组')}
-              >
-                <Button
-                  size='small'
-                  type='tertiary'
-                  onClick={() => testChannel(record, '')}
+              {canOperateChannel && (
+                <SplitButtonGroup
+                  className='overflow-hidden'
+                  aria-label={t('测试单个渠道操作项目组')}
                 >
-                  {t('测试')}
-                </Button>
-                <Button
-                  size='small'
-                  type='tertiary'
-                  icon={<IconTreeTriangleDown />}
-                  onClick={() => {
-                    setCurrentTestChannel(record);
-                    setShowModelTestModal(true);
-                  }}
-                />
-              </SplitButtonGroup>
-
-              {record.status === 1 ? (
-                <Button
-                  type='danger'
-                  size='small'
-                  onClick={() => manageChannel(record.id, 'disable', record)}
-                >
-                  {t('禁用')}
-                </Button>
-              ) : (
-                <Button
-                  size='small'
-                  onClick={() => manageChannel(record.id, 'enable', record)}
-                >
-                  {t('启用')}
-                </Button>
+                  <Button
+                    size='small'
+                    type='tertiary'
+                    onClick={() => testChannel(record, '')}
+                  >
+                    {t('测试')}
+                  </Button>
+                  <Button
+                    size='small'
+                    type='tertiary'
+                    icon={<IconTreeTriangleDown />}
+                    onClick={() => {
+                      setCurrentTestChannel(record);
+                      setShowModelTestModal(true);
+                    }}
+                  />
+                </SplitButtonGroup>
               )}
+
+              {canOperateChannel &&
+                (record.status === 1 ? (
+                  <Button
+                    type='danger'
+                    size='small'
+                    onClick={() => manageChannel(record.id, 'disable', record)}
+                  >
+                    {t('禁用')}
+                  </Button>
+                ) : (
+                  <Button
+                    size='small'
+                    onClick={() => manageChannel(record.id, 'enable', record)}
+                  >
+                    {t('启用')}
+                  </Button>
+                ))}
 
               {record.channel_info?.is_multi_key ? (
                 <SplitButtonGroup aria-label={t('多密钥渠道操作项目组')}>
