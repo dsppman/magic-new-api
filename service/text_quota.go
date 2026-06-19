@@ -328,7 +328,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
 	}
 
-	adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason)
+	adminRejectReason := MaskGhostRejectReason(ctx, common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason))
 	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
 
 	var tieredResult *billingexpr.TieredResult

@@ -133,18 +133,25 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 
 	useTimeSeconds := time.Now().Unix() - relayInfo.StartTime.Unix()
 	tokenName := ctx.GetString("token_name")
-	oai := apiErr.ToOpenAIError()
+	visibleErr := MaskGhostVertexAPIError(ctx, apiErr)
+	oai := visibleErr.ToOpenAIError()
+	violationFeeCode := string(types.ErrorCodeViolationFeeGrokCSAM)
+	violationFeeMarker := CSAMViolationMarker
+	if IsGhostChannelRelay(ctx) {
+		violationFeeCode = string(visibleErr.GetErrorCode())
+		violationFeeMarker = "CONTENT_FILTERED"
+	}
 
 	other := map[string]any{
 		"violation_fee":        true,
-		"violation_fee_code":   string(types.ErrorCodeViolationFeeGrokCSAM),
+		"violation_fee_code":   violationFeeCode,
 		"fee_quota":            feeQuota,
 		"base_amount":          settings.ViolationDeductionAmount,
 		"group_ratio":          groupRatio,
-		"status_code":          apiErr.StatusCode,
+		"status_code":          visibleErr.StatusCode,
 		"upstream_error_type":  oai.Type,
 		"upstream_error_code":  fmt.Sprintf("%v", oai.Code),
-		"violation_fee_marker": CSAMViolationMarker,
+		"violation_fee_marker": violationFeeMarker,
 	}
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{

@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -145,4 +146,64 @@ func TestSetupContextForSelectedChannelGhostUsesFixedUpstreamForRelay(t *testing
 	assert.Equal(t, ghost.Type, common.GetContextKeyInt(ctx, constant.ContextKeyChannelType))
 	assert.Equal(t, realModelMapping, ctx.GetString("model_mapping"))
 	assert.Equal(t, realStatusCodeMapping, ctx.GetString("status_code_mapping"))
+
+	newAPIError = SetupContextForSelectedChannel(ctx, &real, "gpt-real")
+	require.Nil(t, newAPIError)
+	_, exists := ctx.Get(service.GhostChannelSelectedKey)
+	assert.False(t, exists)
+	_, exists = ctx.Get(service.GhostUpstreamChannelMetaKey)
+	assert.False(t, exists)
+	_, exists = ctx.Get(service.GhostUpstreamChannelModelMappingKey)
+	assert.False(t, exists)
+	_, exists = ctx.Get(service.GhostUpstreamChannelStatusCodeMappingKey)
+	assert.False(t, exists)
+	_, exists = ctx.Get(service.GhostUpstreamChannelOtherKey)
+	assert.False(t, exists)
+}
+
+func TestSetupContextForSelectedChannelGhostMarksEarlySetupErrors(t *testing.T) {
+	db := setupDistributorGhostTestDB(t)
+
+	normalWeight := uint(100)
+	normalPriority := int64(100)
+	ghostWeight := uint(model.GhostChannelMarker)
+	ghostPriority := int64(model.GhostChannelMarker)
+	autoBan := 1
+
+	upstream := model.Channel{
+		Id:       model.GhostChannelUpstreamId,
+		Type:     constant.ChannelTypeOpenAI,
+		Key:      "real-key",
+		Status:   common.ChannelStatusManuallyDisabled,
+		Name:     "real-upstream",
+		Weight:   &normalWeight,
+		Priority: &normalPriority,
+		AutoBan:  &autoBan,
+		Models:   "gpt-real",
+		Group:    "default",
+	}
+	require.NoError(t, db.Create(&upstream).Error)
+
+	ghost := model.Channel{
+		Type:     constant.ChannelTypeGemini,
+		Key:      "ghost-key",
+		Status:   common.ChannelStatusEnabled,
+		Name:     "ghost-channel",
+		Weight:   &ghostWeight,
+		Priority: &ghostPriority,
+		AutoBan:  &autoBan,
+		Models:   "gpt-shadow",
+		Group:    "default",
+	}
+	require.NoError(t, db.Create(&ghost).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	newAPIError := SetupContextForSelectedChannel(ctx, &ghost, "gpt-shadow")
+
+	require.NotNil(t, newAPIError)
+	assert.Equal(t, http.StatusForbidden, newAPIError.StatusCode)
+	_, exists := ctx.Get(service.GhostChannelSelectedKey)
+	assert.True(t, exists)
+	assert.True(t, service.IsGhostChannelRelay(ctx))
 }

@@ -11,8 +11,10 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -65,6 +67,54 @@ func TestGeminiChatHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.
 	require.Equal(t, 2209, usage.CompletionTokens)
 	require.Equal(t, 20689, usage.TotalTokens)
 	require.Equal(t, 1120, usage.CompletionTokenDetails.ReasoningTokens)
+}
+
+func TestGeminiChatHandlerGhostPromptBlockedWritesVertexError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Set(service.GhostUpstreamChannelMetaKey, true)
+
+	blockReason := "SAFETY"
+	payload := dto.GeminiChatResponse{
+		PromptFeedback: &dto.GeminiChatPromptFeedback{
+			BlockReason: &blockReason,
+		},
+	}
+	body, err := common.Marshal(payload)
+	require.NoError(t, err)
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatOpenAI,
+		OriginModelName: "gemini-2.5-flash",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gemini-2.5-flash",
+		},
+	}
+	resp := &http.Response{
+		Body: io.NopCloser(bytes.NewReader(body)),
+	}
+
+	usage, newAPIError := GeminiChatHandler(c, info, resp)
+
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+
+	var response struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, http.StatusBadRequest, response.Error.Code)
+	assert.Equal(t, "FAILED_PRECONDITION", response.Error.Status)
+	assert.Equal(t, "The prompt was blocked because it violates safety policies.", response.Error.Message)
+	assert.NotContains(t, recorder.Body.String(), "Gemini API")
+	assert.NotContains(t, recorder.Body.String(), "prompt_blocked")
 }
 
 func TestGeminiStreamHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.T) {

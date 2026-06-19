@@ -160,7 +160,14 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		if newAPIError := SetupContextForSelectedChannel(c, channel, modelRequest.Model); newAPIError != nil {
+			if service.WriteGhostVertexError(c, newAPIError) {
+				c.Abort()
+				return
+			}
+			abortWithOpenAiMessage(c, newAPIError.StatusCode, newAPIError.Error(), newAPIError.GetErrorCode())
+			return
+		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
@@ -430,7 +437,9 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	if channel == nil {
 		return types.NewError(errors.New("channel is nil"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
+	clearGhostUpstreamContext(c)
 	if channel.IsGhostChannel() {
+		c.Set(service.GhostChannelSelectedKey, true)
 		upstreamChannel, err := model.CacheGetChannel(model.GhostChannelUpstreamId)
 		if err != nil {
 			return types.NewErrorWithStatusCode(
@@ -511,6 +520,14 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	return nil
 }
 
+func clearGhostUpstreamContext(c *gin.Context) {
+	delete(c.Keys, service.GhostChannelSelectedKey)
+	delete(c.Keys, service.GhostUpstreamChannelMetaKey)
+	delete(c.Keys, service.GhostUpstreamChannelModelMappingKey)
+	delete(c.Keys, service.GhostUpstreamChannelStatusCodeMappingKey)
+	delete(c.Keys, service.GhostUpstreamChannelOtherKey)
+}
+
 func setupGhostUpstreamContext(c *gin.Context, upstreamChannel *model.Channel) *types.NewAPIError {
 	key, index, newAPIError := upstreamChannel.GetNextEnabledKey()
 	if newAPIError != nil {
@@ -535,10 +552,10 @@ func setupGhostUpstreamContext(c *gin.Context, upstreamChannel *model.Channel) *
 		meta.Organization = *upstreamChannel.OpenAIOrganization
 	}
 
-	c.Set("__ghost_upstream_channel_meta", meta)
-	c.Set("__ghost_upstream_channel_model_mapping", upstreamChannel.GetModelMapping())
-	c.Set("__ghost_upstream_channel_status_code_mapping", upstreamChannel.GetStatusCodeMapping())
-	c.Set("__ghost_upstream_channel_other", upstreamChannel.Other)
+	c.Set(service.GhostUpstreamChannelMetaKey, meta)
+	c.Set(service.GhostUpstreamChannelModelMappingKey, upstreamChannel.GetModelMapping())
+	c.Set(service.GhostUpstreamChannelStatusCodeMappingKey, upstreamChannel.GetStatusCodeMapping())
+	c.Set(service.GhostUpstreamChannelOtherKey, upstreamChannel.Other)
 	return nil
 }
 
