@@ -241,6 +241,48 @@ func TestMaskGhostVertexAPIErrorMapsUnknownCustomErrorToWrappedInternal(t *testi
 	assert.NotContains(t, openAIError.Message, "Claude")
 }
 
+func TestMaskGhostVertexAPIErrorMapsNewAPIModelRoutingErrorsToPublisherModelNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set(GhostUpstreamChannelMetaKey, true)
+
+	apiErr := types.NewOpenAIError(
+		fmt.Errorf("分组 Gemini 下模型 gemini-test 的可用渠道不存在（retry）"),
+		types.ErrorCodeGetChannelFailed,
+		http.StatusServiceUnavailable,
+	)
+
+	statusCode, vertexError := BuildGhostVertexError(apiErr)
+	assert.Equal(t, http.StatusNotFound, statusCode)
+	assert.Equal(t, "NOT_FOUND", vertexError.Error.Status)
+	assert.Equal(t, ghostVertexPublisherModelNotFoundMessage, vertexError.Error.Message)
+	require.Len(t, vertexError.Error.Details, 1)
+	assert.Equal(t, "RESOURCE_NOT_FOUND", vertexError.Error.Details[0].Reason)
+
+	masked := MaskGhostVertexAPIError(c, apiErr)
+	openAIError := masked.ToOpenAIError()
+
+	assert.Equal(t, http.StatusNotFound, masked.StatusCode)
+	assert.Equal(t, ghostVertexPublisherModelNotFoundMessage, openAIError.Message)
+	assert.NotContains(t, openAIError.Message, "分组")
+	assert.NotContains(t, openAIError.Message, "可用渠道")
+	assert.NotContains(t, openAIError.Message, "retry")
+}
+
+func TestBuildGhostVertexErrorKeepsGenericNotFoundMessage(t *testing.T) {
+	apiErr := types.NewOpenAIError(
+		fmt.Errorf("requested resource not found"),
+		types.ErrorCodeBadResponseStatusCode,
+		http.StatusNotFound,
+	)
+
+	statusCode, vertexError := BuildGhostVertexError(apiErr)
+
+	assert.Equal(t, http.StatusNotFound, statusCode)
+	assert.Equal(t, "NOT_FOUND", vertexError.Error.Status)
+	assert.Equal(t, "Requested entity was not found.", vertexError.Error.Message)
+}
+
 func TestWriteGhostVertexErrorMasksSelectedGhostBeforeUpstreamMeta(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

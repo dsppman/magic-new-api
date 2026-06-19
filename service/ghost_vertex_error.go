@@ -19,6 +19,8 @@ const (
 	GhostUpstreamChannelModelMappingKey      = "__ghost_upstream_channel_model_mapping"
 	GhostUpstreamChannelStatusCodeMappingKey = "__ghost_upstream_channel_status_code_mapping"
 	GhostUpstreamChannelOtherKey             = "__ghost_upstream_channel_other"
+
+	ghostVertexPublisherModelNotFoundMessage = "Publisher Model was not found or your project does not have access to it. Please ensure you are using a valid model version and location."
 )
 
 type vertexAIErrorTemplate struct {
@@ -188,6 +190,13 @@ func ghostVertexErrorTemplateFor(apiErr *types.NewAPIError) vertexAIErrorTemplat
 			message: "Request had invalid authentication credentials.",
 			reason:  "AUTHENTICATION_ERROR",
 		}
+	case isGhostVertexPublisherModelNotFound(text):
+		return vertexAIErrorTemplate{
+			code:    http.StatusNotFound,
+			status:  "NOT_FOUND",
+			message: ghostVertexPublisherModelNotFoundMessage,
+			reason:  "RESOURCE_NOT_FOUND",
+		}
 	case statusCode == http.StatusForbidden ||
 		strings.Contains(text, "permission") ||
 		strings.Contains(text, "denied") ||
@@ -279,4 +288,40 @@ func ghostVertexErrorTemplateFor(apiErr *types.NewAPIError) vertexAIErrorTemplat
 			reason:  "INTERNAL_ERROR",
 		}
 	}
+}
+
+func isGhostVertexPublisherModelNotFound(text string) bool {
+	switch {
+	case strings.Contains(text, "model_not_found"),
+		strings.Contains(text, "model not found"),
+		strings.Contains(text, "model was not found"),
+		strings.Contains(text, "publisher model"),
+		strings.Contains(text, "模型不存在"),
+		strings.Contains(text, "可用渠道不存在"),
+		strings.Contains(text, "可用渠道失败"):
+		return true
+	}
+
+	hasModelHint := strings.Contains(text, "model") ||
+		strings.Contains(text, "模型") ||
+		strings.Contains(text, "publisher")
+	hasLocationHint := strings.Contains(text, "region") ||
+		strings.Contains(text, "location") ||
+		strings.Contains(text, "区域") ||
+		strings.Contains(text, "地区")
+	hasAccessOrNotFoundHint := strings.Contains(text, "not found") ||
+		strings.Contains(text, "does not have access") ||
+		strings.Contains(text, "no access") ||
+		strings.Contains(text, "not available") ||
+		strings.Contains(text, "unavailable") ||
+		strings.Contains(text, "unsupported") ||
+		strings.Contains(text, "无权限") ||
+		strings.Contains(text, "没有权限") ||
+		strings.Contains(text, "不存在") ||
+		strings.Contains(text, "不可用")
+	if hasModelHint && (hasLocationHint || hasAccessOrNotFoundHint) {
+		return true
+	}
+
+	return strings.Contains(text, "no available channel") && strings.Contains(text, "model")
 }
