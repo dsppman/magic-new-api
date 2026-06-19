@@ -35,6 +35,7 @@ func TestGenerateDefaultVertexChannels(t *testing.T) {
 		assert.Equal(t, constant.ChannelTypeVertexAi, channel.Type)
 		assert.Equal(t, "Gemini", channel.Group)
 		assert.Greater(t, channel.CreatedTime, previousCreatedTime)
+		assert.LessOrEqual(t, channel.CreatedTime, int64(1781763600))
 		if previousCreatedTime > 0 {
 			createdGaps = append(createdGaps, channel.CreatedTime-previousCreatedTime)
 		}
@@ -156,6 +157,35 @@ func TestGenerateCanRandomizeAutoDisabledStatusTimeInRange(t *testing.T) {
 		statusTimeGaps = append(statusTimeGaps, disabledStatusTimes[i]-disabledStatusTimes[i-1])
 	}
 	assert.Greater(t, distinctInt64Count(statusTimeGaps), 10)
+}
+
+func TestGenerateCapsFutureRandomDisableStatusTimesAtNow(t *testing.T) {
+	randomAutoDisable := true
+	now := int64(1781763600)
+	channels, stats, err := Generate(Options{
+		Count:                  DefaultCount,
+		RandomAutoDisable:      &randomAutoDisable,
+		RandomDisableStartTime: now - 3600,
+		RandomDisableEndTime:   now + 3600,
+		Now:                    now,
+	})
+	require.NoError(t, err)
+	require.Len(t, channels, DefaultCount)
+	assert.Greater(t, stats.AutoDisabled, 0)
+
+	for _, channel := range channels {
+		assert.LessOrEqual(t, channel.CreatedTime, now)
+		if channel.Status != common.ChannelStatusAutoDisabled {
+			continue
+		}
+
+		var otherInfo map[string]any
+		require.NoError(t, common.Unmarshal([]byte(channel.OtherInfo), &otherInfo))
+		statusTime, ok := otherInfo["status_time"].(float64)
+		require.True(t, ok)
+		assert.LessOrEqual(t, int64(statusTime), now)
+		assert.GreaterOrEqual(t, int64(statusTime), channel.CreatedTime)
+	}
 }
 
 func TestGenerateCanUseProvidedGroups(t *testing.T) {

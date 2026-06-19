@@ -184,6 +184,9 @@ func validateRandomDisableTimeRange(startTime int64, endTime int64) (int64, int6
 	if endTime < startTime {
 		return 0, 0, "随机自动禁用时间段开始时间不能晚于结束时间"
 	}
+	if endTime > common.GetTimestamp() {
+		return 0, 0, "随机自动禁用时间段结束时间不能晚于当前时间"
+	}
 	return startTime, endTime, ""
 }
 

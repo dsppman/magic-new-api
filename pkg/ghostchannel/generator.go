@@ -504,6 +504,12 @@ func SequentialStatusTimes(count int, rng *rand.Rand, now int64, randomDisableSt
 
 func disableTimelineRange(now int64, randomDisableStartTime int64, randomDisableEndTime int64) (int64, int64) {
 	if randomDisableStartTime > 0 && randomDisableEndTime >= randomDisableStartTime {
+		if randomDisableStartTime > now {
+			randomDisableStartTime = now
+		}
+		if randomDisableEndTime > now {
+			randomDisableEndTime = now
+		}
 		return randomDisableStartTime, randomDisableEndTime
 	}
 	return now - 5*24*3600, now
@@ -581,11 +587,12 @@ func RandomStatusTime(rng *rand.Rand, now int64, randomDisableStartTime int64, r
 	if rng == nil {
 		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}
+	start, end := disableTimelineRange(now, randomDisableStartTime, randomDisableEndTime)
 	if randomDisableStartTime > 0 && randomDisableEndTime >= randomDisableStartTime {
-		if randomDisableEndTime == randomDisableStartTime {
-			return randomDisableStartTime
+		if end == start {
+			return start
 		}
-		return randomDisableStartTime + rng.Int63n(randomDisableEndTime-randomDisableStartTime+1)
+		return start + rng.Int63n(end-start+1)
 	}
 	return now - int64(rng.Intn(5*24*3600))
 }

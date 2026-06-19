@@ -643,3 +643,13 @@ func TestRandomDisableGhostChannelsUsesStatusTimesInRequestedRange(t *testing.T)
 	assert.Equal(t, body.Data.StatusTimeMin, statusTimes[0])
 	assert.Equal(t, body.Data.StatusTimeMax, statusTimes[len(statusTimes)-1])
 }
+
+func TestValidateRandomDisableTimeRangeRejectsFutureEndTime(t *testing.T) {
+	now := common.GetTimestamp()
+
+	start, end, message := validateRandomDisableTimeRange(now-60, now+60)
+
+	assert.Zero(t, start)
+	assert.Zero(t, end)
+	assert.Equal(t, "随机自动禁用时间段结束时间不能晚于当前时间", message)
+}
