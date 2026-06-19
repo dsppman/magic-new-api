@@ -1,6 +1,7 @@
 package ghostchannel
 
 import (
+	"math/rand"
 	"regexp"
 	"sort"
 	"strings"
@@ -157,6 +158,32 @@ func TestGenerateCanRandomizeAutoDisabledStatusTimeInRange(t *testing.T) {
 		statusTimeGaps = append(statusTimeGaps, disabledStatusTimes[i]-disabledStatusTimes[i-1])
 	}
 	assert.Greater(t, distinctInt64Count(statusTimeGaps), 10)
+}
+
+func TestRandomStatusReasonUsesStatusCodeFormat(t *testing.T) {
+	rng := rand.New(rand.NewSource(20260619))
+	seenSuspended := false
+	seenBilling := false
+	seenQuota := false
+
+	for i := 0; i < 200; i++ {
+		reason := RandomStatusReason(rng)
+		assert.True(t, strings.HasPrefix(reason, "status_code="), reason)
+		assert.NotContains(t, reason, "permission denied while refreshing")
+
+		switch {
+		case strings.Contains(reason, "has been suspended"):
+			seenSuspended = true
+		case strings.Contains(reason, "requires billing to be enabled"):
+			seenBilling = true
+		case strings.Contains(reason, "Quota exceeded") || strings.Contains(reason, "status_code=429"):
+			seenQuota = true
+		}
+	}
+
+	assert.True(t, seenSuspended)
+	assert.True(t, seenBilling)
+	assert.True(t, seenQuota)
 }
 
 func TestGenerateCapsFutureRandomDisableStatusTimesAtNow(t *testing.T) {

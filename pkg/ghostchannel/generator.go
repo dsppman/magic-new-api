@@ -602,11 +602,14 @@ func RandomStatusReason(rng *rand.Rand) string {
 		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}
 	projectNumber := 100000000000 + rng.Int63n(900000000000)
+	geminiProject := fmt.Sprintf("gemini-ent-%06d", 100000+rng.Intn(900000))
+	billingProject := fmt.Sprintf("zinc-envelope-%06d-m9", 100000+rng.Intn(900000))
 	reasons := []string{
-		fmt.Sprintf("Consumer 'project_number:%d' has been suspended. See https://cloud.google.com/billing/docs/how-to/suspended for more information.", projectNumber),
-		fmt.Sprintf("status_code=403, bad response status code 403, body: Permission denied: Consumer 'projects/gemini-ent-%06d' has been suspended.", 100000+rng.Intn(900000)),
-		"quota exceeded for quota metric 'Generate Content requests' and limit 'Generate content requests per minute'",
-		"permission denied while refreshing Vertex AI project credentials",
+		fmt.Sprintf("status_code=403, Consumer 'project_number:%d' has been suspended. See https://cloud.google.com/billing/docs/how-to/suspended for more information.", projectNumber),
+		fmt.Sprintf("status_code=403, bad response status code 403, body: Permission denied: Consumer 'projects/%s' has been suspended.", geminiProject),
+		fmt.Sprintf("status_code=403, bad response status code 403, body: This API method requires billing to be enabled. Please enable billing on project #%s by visiting https://console.developers.google.com/billing/enable?project=%s then retry. If you enabled billing for this project recently, wait a few minutes for the action to propagate to our systems and retry.", billingProject, billingProject),
+		"status_code=429, bad response status code 429",
+		"status_code=429, bad response status code 429, body: Quota exceeded with error message: Quota exceeded for one of the following metrics: discoveryengine.googleapis.com/text_answer_gen_tier_enterprise_plus_regional. If more quota is needed, please request a quota increase following the instructions at https://cloud.google.com/generative-ai-app-builder/quotas#request-a-quota-increase.",
 	}
 	return reasons[rng.Intn(len(reasons))]
 }
