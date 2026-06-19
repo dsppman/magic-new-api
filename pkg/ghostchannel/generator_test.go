@@ -1,6 +1,7 @@
 package ghostchannel
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -8,7 +9,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/google/uuid"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,23 +24,37 @@ func TestGenerateDefaultVertexChannels(t *testing.T) {
 	assert.Zero(t, stats.AutoDisabled)
 
 	seenNames := make(map[string]struct{}, len(channels))
+	seenModelSets := make(map[string]struct{}, len(channels))
+	nonZeroQuota := 0
+	previousCreatedTime := int64(0)
+	createdGaps := make([]int64, 0, len(channels)-1)
 	regionSet := knownRegionSet()
+	uuidPattern := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 	for _, channel := range channels {
 		assert.Zero(t, channel.Id)
 		assert.Equal(t, constant.ChannelTypeVertexAi, channel.Type)
 		assert.Equal(t, "Gemini", channel.Group)
+		assert.Greater(t, channel.CreatedTime, previousCreatedTime)
+		if previousCreatedTime > 0 {
+			createdGaps = append(createdGaps, channel.CreatedTime-previousCreatedTime)
+		}
+		previousCreatedTime = channel.CreatedTime
+		assert.GreaterOrEqual(t, channel.TestTime, channel.CreatedTime)
+		assert.LessOrEqual(t, channel.TestTime, int64(1781763600))
 		require.NotNil(t, channel.Weight)
 		require.NotNil(t, channel.Priority)
 		assert.Equal(t, uint(model.GhostChannelMarker), *channel.Weight)
 		assert.Equal(t, int64(model.GhostChannelMarker), *channel.Priority)
-		assert.Zero(t, channel.ResponseTime)
-		assert.Zero(t, channel.UsedQuota)
+		assert.Greater(t, channel.ResponseTime, 0)
+		assert.GreaterOrEqual(t, channel.UsedQuota, int64(0))
+		if channel.UsedQuota > 0 {
+			nonZeroQuota++
+		}
 		assert.Equal(t, DefaultTag, *channel.Tag)
-		parsedName, err := uuid.Parse(channel.Name)
-		require.NoError(t, err)
-		assert.Equal(t, 4, int(parsedName.Version()))
+		assert.NotEmpty(t, channel.Name)
+		assert.False(t, uuidPattern.MatchString(channel.Name), "channel name should not look like a raw UUID: %s", channel.Name)
 		if _, ok := seenNames[channel.Name]; ok {
-			t.Fatalf("duplicate channel UUID: %s", channel.Name)
+			t.Fatalf("duplicate channel name: %s", channel.Name)
 		}
 		seenNames[channel.Name] = struct{}{}
 
@@ -59,7 +73,11 @@ func TestGenerateDefaultVertexChannels(t *testing.T) {
 		require.NoError(t, common.Unmarshal([]byte(channel.OtherSettings), &settings))
 		assert.Equal(t, "json", settings["vertex_key_type"])
 		assert.NotEmpty(t, strings.Split(channel.Models, ","))
+		seenModelSets[channel.Models] = struct{}{}
 	}
+	assert.Greater(t, nonZeroQuota, DefaultCount/2)
+	assert.Greater(t, len(seenModelSets), 1)
+	assert.Greater(t, distinctInt64Count(createdGaps), 10)
 }
 
 func TestGenerateCanRandomizeUsedQuotaAndAutoDisabled(t *testing.T) {
@@ -105,7 +123,12 @@ func TestGenerateCanRandomizeAutoDisabledStatusTimeInRange(t *testing.T) {
 	require.Len(t, channels, DefaultCount)
 	assert.Greater(t, stats.AutoDisabled, 0)
 
-	for _, channel := range channels {
+	previousCreatedTime := int64(0)
+	disabledIndexes := make([]int, 0, stats.AutoDisabled)
+	disabledStatusTimes := make([]int64, 0, stats.AutoDisabled)
+	for index, channel := range channels {
+		assert.Greater(t, channel.CreatedTime, previousCreatedTime)
+		previousCreatedTime = channel.CreatedTime
 		if channel.Status != common.ChannelStatusAutoDisabled {
 			continue
 		}
@@ -116,7 +139,23 @@ func TestGenerateCanRandomizeAutoDisabledStatusTimeInRange(t *testing.T) {
 		require.True(t, ok)
 		assert.GreaterOrEqual(t, int64(statusTime), startTime)
 		assert.LessOrEqual(t, int64(statusTime), endTime)
+		assert.GreaterOrEqual(t, int64(statusTime), channel.CreatedTime)
+		disabledIndexes = append(disabledIndexes, index)
+		disabledStatusTimes = append(disabledStatusTimes, int64(statusTime))
 	}
+	assert.Greater(t, len(disabledIndexes), 2)
+	assert.False(t, indexesAreConsecutive(disabledIndexes))
+	assert.False(t, int64sAreNonDecreasing(disabledStatusTimes))
+
+	sort.Slice(disabledStatusTimes, func(i, j int) bool {
+		return disabledStatusTimes[i] < disabledStatusTimes[j]
+	})
+	statusTimeGaps := make([]int64, 0, len(disabledStatusTimes)-1)
+	for i := 1; i < len(disabledStatusTimes); i++ {
+		assert.GreaterOrEqual(t, disabledStatusTimes[i], disabledStatusTimes[i-1])
+		statusTimeGaps = append(statusTimeGaps, disabledStatusTimes[i]-disabledStatusTimes[i-1])
+	}
+	assert.Greater(t, distinctInt64Count(statusTimeGaps), 10)
 }
 
 func TestGenerateCanUseProvidedGroups(t *testing.T) {
@@ -190,4 +229,36 @@ func knownRegionSet() map[string]struct{} {
 		result[region.Value] = struct{}{}
 	}
 	return result
+}
+
+func distinctInt64Count(values []int64) int {
+	seen := make(map[int64]struct{}, len(values))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	return len(seen)
+}
+
+func indexesAreConsecutive(indexes []int) bool {
+	if len(indexes) < 2 {
+		return true
+	}
+	for i := 1; i < len(indexes); i++ {
+		if indexes[i] != indexes[i-1]+1 {
+			return false
+		}
+	}
+	return true
+}
+
+func int64sAreNonDecreasing(values []int64) bool {
+	if len(values) < 2 {
+		return true
+	}
+	for i := 1; i < len(values); i++ {
+		if values[i] < values[i-1] {
+			return false
+		}
+	}
+	return true
 }

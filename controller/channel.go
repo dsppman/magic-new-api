@@ -51,6 +51,8 @@ type OpenAIModelsResponse struct {
 	Success bool          `json:"success"`
 }
 
+const adminChannelCreatedTime = 1997
+
 func parseStatusFilter(statusParam string) int {
 	switch strings.ToLower(statusParam) {
 	case "enabled", "1":
@@ -66,6 +68,12 @@ func clearChannelInfo(channel *model.Channel) {
 	if channel.ChannelInfo.IsMultiKey {
 		channel.ChannelInfo.MultiKeyDisabledReason = nil
 		channel.ChannelInfo.MultiKeyDisabledTime = nil
+	}
+}
+
+func maskChannelForAdminRequest(c *gin.Context, channel *model.Channel) {
+	if isAdminRequest(c) {
+		channel.CreatedTime = adminChannelCreatedTime
 	}
 }
 
@@ -196,6 +204,7 @@ func GetAllChannels(c *gin.Context) {
 
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
+		maskChannelForAdminRequest(c, datum)
 	}
 
 	countQuery := buildChannelListQueryForRequest(c, groupFilter, statusFilter, -1)
@@ -402,6 +411,7 @@ func SearchChannels(c *gin.Context) {
 
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
+		maskChannelForAdminRequest(c, datum)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -432,6 +442,7 @@ func GetChannel(c *gin.Context) {
 		return
 	}
 	clearChannelInfo(&channel)
+	maskChannelForAdminRequest(c, &channel)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

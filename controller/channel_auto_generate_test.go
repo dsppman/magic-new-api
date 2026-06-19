@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,7 +15,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -66,26 +66,28 @@ func TestAdminOnlyReadsGhostChannels(t *testing.T) {
 	autoBan := 1
 
 	require.NoError(t, db.Create(&model.Channel{
-		Type:     constant.ChannelTypeOpenAI,
-		Key:      "real-secret",
-		Status:   common.ChannelStatusEnabled,
-		Name:     "real-upstream",
-		Weight:   &normalWeight,
-		Priority: &normalPriority,
-		AutoBan:  &autoBan,
-		Models:   "gpt-4o",
-		Group:    "real",
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "real-secret",
+		Status:      common.ChannelStatusEnabled,
+		Name:        "real-upstream",
+		Weight:      &normalWeight,
+		Priority:    &normalPriority,
+		AutoBan:     &autoBan,
+		Models:      "gpt-4o",
+		Group:       "real",
+		CreatedTime: 111,
 	}).Error)
 	require.NoError(t, db.Create(&model.Channel{
-		Type:     constant.ChannelTypeVertexAi,
-		Key:      "generated-secret",
-		Status:   common.ChannelStatusEnabled,
-		Name:     "generated.viewer@gmail.com",
-		Weight:   &ghostWeight,
-		Priority: &ghostPriority,
-		AutoBan:  &autoBan,
-		Models:   "gemini-2.5-flash",
-		Group:    "Gemini",
+		Type:        constant.ChannelTypeVertexAi,
+		Key:         "generated-secret",
+		Status:      common.ChannelStatusEnabled,
+		Name:        "generated.viewer@gmail.com",
+		Weight:      &ghostWeight,
+		Priority:    &ghostPriority,
+		AutoBan:     &autoBan,
+		Models:      "gemini-2.5-flash",
+		Group:       "Gemini",
+		CreatedTime: 222,
 	}).Error)
 
 	adminBody := performGetAllChannelsForRole(t, common.RoleAdminUser)
@@ -94,11 +96,18 @@ func TestAdminOnlyReadsGhostChannels(t *testing.T) {
 	assert.Equal(t, int64(1), adminBody.Data.Total)
 	assert.Equal(t, "generated.viewer@gmail.com", adminBody.Data.Items[0].Name)
 	assert.Empty(t, adminBody.Data.Items[0].Key)
+	assert.Equal(t, int64(adminChannelCreatedTime), adminBody.Data.Items[0].CreatedTime)
 
 	rootBody := performGetAllChannelsForRole(t, common.RoleRootUser)
 	require.True(t, rootBody.Success)
 	assert.Equal(t, int64(2), rootBody.Data.Total)
 	assert.Len(t, rootBody.Data.Items, 2)
+	rootCreatedTimes := map[string]int64{}
+	for _, channel := range rootBody.Data.Items {
+		rootCreatedTimes[channel.Name] = channel.CreatedTime
+	}
+	assert.Equal(t, int64(111), rootCreatedTimes["real-upstream"])
+	assert.Equal(t, int64(222), rootCreatedTimes["generated.viewer@gmail.com"])
 }
 
 func performGetAllChannelsForRole(t *testing.T, role int) channelListAPIResponse {
@@ -155,28 +164,30 @@ func TestGetChannelFiltersGhostForAdmin(t *testing.T) {
 	autoBan := 1
 
 	real := model.Channel{
-		Type:     constant.ChannelTypeOpenAI,
-		Key:      "real-secret",
-		Status:   common.ChannelStatusEnabled,
-		Name:     "real-upstream",
-		Weight:   &normalWeight,
-		Priority: &normalPriority,
-		AutoBan:  &autoBan,
-		Models:   "gpt-4o",
-		Group:    "real",
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "real-secret",
+		Status:      common.ChannelStatusEnabled,
+		Name:        "real-upstream",
+		Weight:      &normalWeight,
+		Priority:    &normalPriority,
+		AutoBan:     &autoBan,
+		Models:      "gpt-4o",
+		Group:       "real",
+		CreatedTime: 333,
 	}
 	require.NoError(t, db.Create(&real).Error)
 
 	generated := model.Channel{
-		Type:     constant.ChannelTypeVertexAi,
-		Key:      "generated-secret",
-		Status:   common.ChannelStatusEnabled,
-		Name:     "generated.detail@gmail.com",
-		Weight:   &ghostWeight,
-		Priority: &ghostPriority,
-		AutoBan:  &autoBan,
-		Models:   "gemini-2.5-flash",
-		Group:    "Gemini",
+		Type:        constant.ChannelTypeVertexAi,
+		Key:         "generated-secret",
+		Status:      common.ChannelStatusEnabled,
+		Name:        "generated.detail@gmail.com",
+		Weight:      &ghostWeight,
+		Priority:    &ghostPriority,
+		AutoBan:     &autoBan,
+		Models:      "gemini-2.5-flash",
+		Group:       "Gemini",
+		CreatedTime: 444,
 	}
 	require.NoError(t, db.Create(&generated).Error)
 
@@ -184,6 +195,7 @@ func TestGetChannelFiltersGhostForAdmin(t *testing.T) {
 	require.True(t, adminGenerated.Success)
 	assert.Equal(t, "generated.detail@gmail.com", adminGenerated.Data.Name)
 	assert.Empty(t, adminGenerated.Data.Key)
+	assert.Equal(t, int64(adminChannelCreatedTime), adminGenerated.Data.CreatedTime)
 
 	adminReal := performGetChannelForRole(t, common.RoleAdminUser, real.Id)
 	assert.False(t, adminReal.Success)
@@ -191,6 +203,7 @@ func TestGetChannelFiltersGhostForAdmin(t *testing.T) {
 	rootReal := performGetChannelForRole(t, common.RoleRootUser, real.Id)
 	require.True(t, rootReal.Success)
 	assert.Equal(t, "real-upstream", rootReal.Data.Name)
+	assert.Equal(t, int64(333), rootReal.Data.CreatedTime)
 }
 
 func TestEnabledListModelsFiltersGhostForAdmin(t *testing.T) {
@@ -306,6 +319,7 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 	autoBan := 1
 
 	require.NoError(t, db.Create(&model.Channel{
+		Id:       model.GhostChannelUpstreamId,
 		Type:     constant.ChannelTypeOpenAI,
 		Key:      "real-secret",
 		Status:   common.ChannelStatusEnabled,
@@ -313,7 +327,7 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 		Weight:   &normalWeight,
 		Priority: &normalPriority,
 		AutoBan:  &autoBan,
-		Models:   "gpt-4o",
+		Models:   "gemini-2.5-flash,gemini-2.5-pro",
 		Group:    "real",
 	}).Error)
 	require.NoError(t, db.Create(&model.Channel{
@@ -333,7 +347,7 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 	reqBody, err := common.Marshal(map[string]any{
 		"count":                     20,
 		"seed":                      int64(123),
-		"models":                    "gemini-2.5-flash,gemini-2.5-pro",
+		"models":                    "gemini-2.5-flash,gemini-2.5-pro,not-on-upstream",
 		"groups":                    []string{"vip", "default"},
 		"random_used_quota":         true,
 		"random_disable_start_time": randomDisableStartTime,
@@ -387,9 +401,8 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 			continue
 		}
 		newGenerated++
-		parsedName, err := uuid.Parse(channel.Name)
-		require.NoError(t, err)
-		assert.Equal(t, 4, int(parsedName.Version()))
+		assert.NotEmpty(t, channel.Name)
+		assert.NotContains(t, channel.Name, "@")
 		assert.Equal(t, "gemini-2.5-flash,gemini-2.5-pro", channel.Models)
 		assert.Equal(t, "vip,default", channel.Group)
 		assert.Greater(t, channel.UsedQuota, int64(0))
@@ -407,6 +420,34 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 	assert.Equal(t, 20, newGenerated)
 	assert.Equal(t, body.Data.AutoDisabled, newAutoDisabled)
 	assert.Greater(t, responseTimeCount, 0)
+}
+
+func TestResolveGhostChannelModelsUsesUpstreamModelList(t *testing.T) {
+	db := setupAutoChannelControllerTestDB(t)
+
+	normalWeight := uint(100)
+	normalPriority := int64(100)
+	autoBan := 1
+	require.NoError(t, db.Create(&model.Channel{
+		Id:       model.GhostChannelUpstreamId,
+		Type:     constant.ChannelTypeOpenAI,
+		Key:      "real-secret",
+		Status:   common.ChannelStatusEnabled,
+		Name:     "real-upstream",
+		Weight:   &normalWeight,
+		Priority: &normalPriority,
+		AutoBan:  &autoBan,
+		Models:   "gemini-2.5-flash,gemini-2.5-pro,gemini-embedding-001",
+		Group:    "real",
+	}).Error)
+
+	models, err := resolveGhostChannelModels("")
+	require.NoError(t, err)
+	assert.Equal(t, "gemini-2.5-flash,gemini-2.5-pro,gemini-embedding-001", models)
+
+	models, err = resolveGhostChannelModels("gemini-2.5-pro,not-on-upstream,gemini-2.5-flash,gemini-2.5-pro")
+	require.NoError(t, err)
+	assert.Equal(t, "gemini-2.5-pro,gemini-2.5-flash", models)
 }
 
 func TestRandomDisableGhostChannelsUpdatesEnabledGhostChannels(t *testing.T) {
@@ -474,10 +515,12 @@ func TestRandomDisableGhostChannelsUpdatesEnabledGhostChannels(t *testing.T) {
 	var body struct {
 		Success bool `json:"success"`
 		Data    struct {
-			Requested  int   `json:"requested"`
-			Available  int   `json:"available"`
-			Disabled   int   `json:"disabled"`
-			StatusTime int64 `json:"status_time"`
+			Requested     int   `json:"requested"`
+			Available     int   `json:"available"`
+			Disabled      int   `json:"disabled"`
+			StatusTime    int64 `json:"status_time"`
+			StatusTimeMin int64 `json:"status_time_min"`
+			StatusTimeMax int64 `json:"status_time_max"`
 		} `json:"data"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
@@ -487,13 +530,15 @@ func TestRandomDisableGhostChannelsUpdatesEnabledGhostChannels(t *testing.T) {
 	assert.Equal(t, 3, body.Data.Disabled)
 	assert.GreaterOrEqual(t, body.Data.StatusTime, before)
 	assert.LessOrEqual(t, body.Data.StatusTime, after)
+	assert.LessOrEqual(t, body.Data.StatusTimeMin, body.Data.StatusTimeMax)
+	assert.LessOrEqual(t, body.Data.StatusTimeMax, body.Data.StatusTime)
 
 	var real model.Channel
 	require.NoError(t, db.Where("name = ?", "real-upstream").First(&real).Error)
 	assert.Equal(t, common.ChannelStatusEnabled, real.Status)
 
 	var ghosts []model.Channel
-	require.NoError(t, model.ApplyGhostChannelFilter(db.Model(&model.Channel{})).Find(&ghosts).Error)
+	require.NoError(t, model.ApplyGhostChannelFilter(db.Model(&model.Channel{})).Order("created_time asc").Order("id asc").Find(&ghosts).Error)
 	require.Len(t, ghosts, 6)
 
 	newlyDisabled := 0
@@ -515,7 +560,8 @@ func TestRandomDisableGhostChannelsUpdatesEnabledGhostChannels(t *testing.T) {
 			assert.NotEmpty(t, reason)
 			statusTime, ok := info["status_time"].(float64)
 			require.True(t, ok)
-			assert.Equal(t, body.Data.StatusTime, int64(statusTime))
+			assert.GreaterOrEqual(t, int64(statusTime), body.Data.StatusTimeMin)
+			assert.LessOrEqual(t, int64(statusTime), body.Data.StatusTimeMax)
 		default:
 			t.Fatalf("unexpected ghost channel status %d", channel.Status)
 		}
@@ -580,13 +626,20 @@ func TestRandomDisableGhostChannelsUsesStatusTimesInRequestedRange(t *testing.T)
 	assert.LessOrEqual(t, body.Data.StatusTimeMax, randomDisableEndTime)
 
 	var ghosts []model.Channel
-	require.NoError(t, model.ApplyGhostChannelFilter(db.Model(&model.Channel{})).Find(&ghosts).Error)
+	require.NoError(t, model.ApplyGhostChannelFilter(db.Model(&model.Channel{})).Order("created_time asc").Order("id asc").Find(&ghosts).Error)
 	require.Len(t, ghosts, 5)
+	statusTimes := make([]int64, 0, len(ghosts))
 	for _, channel := range ghosts {
 		require.Equal(t, common.ChannelStatusAutoDisabled, channel.Status)
 		statusTime, ok := channel.GetOtherInfo()["status_time"].(float64)
 		require.True(t, ok)
 		assert.GreaterOrEqual(t, int64(statusTime), randomDisableStartTime)
 		assert.LessOrEqual(t, int64(statusTime), randomDisableEndTime)
+		statusTimes = append(statusTimes, int64(statusTime))
 	}
+	sort.Slice(statusTimes, func(i, j int) bool {
+		return statusTimes[i] < statusTimes[j]
+	})
+	assert.Equal(t, body.Data.StatusTimeMin, statusTimes[0])
+	assert.Equal(t, body.Data.StatusTimeMax, statusTimes[len(statusTimes)-1])
 }

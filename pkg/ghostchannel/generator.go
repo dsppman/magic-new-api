@@ -12,7 +12,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/google/uuid"
 )
 
 const (
@@ -47,6 +46,18 @@ type weightedString struct {
 	Weight int
 }
 
+type weightedModelSet struct {
+	Models []string
+	Weight int
+}
+
+type poolTimelineEntry struct {
+	CreatedTime int64
+	Status      int
+	StatusTime  int64
+	TestTime    int64
+}
+
 type serviceAccountKey struct {
 	Type                    string `json:"type"`
 	ProjectID               string `json:"project_id"`
@@ -77,20 +88,83 @@ var vertexDefaultRegions = []weightedString{
 	{Value: "us-west4", Weight: 7},
 }
 
-var modelSets = [][]string{
+var channelNamePrefixes = []weightedString{
+	{Value: "vertex", Weight: 24},
+	{Value: "vertex-ai", Weight: 20},
+	{Value: "gemini", Weight: 18},
+	{Value: "gcp-vertex", Weight: 12},
+	{Value: "genai", Weight: 10},
+	{Value: "ai-platform", Weight: 8},
+	{Value: "google-ai", Weight: 8},
+}
+
+var channelNameRoles = []weightedString{
+	{Value: "chat", Weight: 22},
+	{Value: "gateway", Weight: 18},
+	{Value: "pool", Weight: 14},
+	{Value: "shared", Weight: 12},
+	{Value: "prod", Weight: 12},
+	{Value: "svc", Weight: 10},
+	{Value: "vision", Weight: 6},
+	{Value: "batch", Weight: 4},
+	{Value: "embed", Weight: 2},
+}
+
+var projectPrefixes = []weightedString{
+	{Value: "gemini-prod", Weight: 22},
+	{Value: "vertex-prod", Weight: 20},
+	{Value: "genai-platform", Weight: 16},
+	{Value: "gcp-ai", Weight: 14},
+	{Value: "llm-prod", Weight: 12},
+	{Value: "ml-serving", Weight: 10},
+	{Value: "aiplatform", Weight: 6},
+}
+
+var projectWords = []weightedString{
+	{Value: "core", Weight: 16},
+	{Value: "chat", Weight: 14},
+	{Value: "gateway", Weight: 13},
+	{Value: "prod", Weight: 12},
+	{Value: "shared", Weight: 10},
+	{Value: "vision", Weight: 8},
+	{Value: "serve", Weight: 8},
+	{Value: "batch", Weight: 6},
+	{Value: "embed", Weight: 5},
+	{Value: "ops", Weight: 4},
+}
+
+var defaultModelSets = []weightedModelSet{
 	{
-		"gemini-2.5-flash",
-		"gemini-2.5-flash-lite",
-		"gemini-2.5-flash-image",
-		"gemini-2.5-pro",
-		"gemini-3.1-flash-lite",
-		"gemini-3.5-flash",
-		"gemini-3.1-pro-preview",
-		"gemini-flash-latest",
-		"gemini-flash-lite-latest",
-		"gemini-3-pro-preview",
-		"gemini-3.1-flash-image-preview",
-		"gemini-3-flash-preview",
+		Models: []string{"gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"},
+		Weight: 24,
+	},
+	{
+		Models: []string{"gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-pro"},
+		Weight: 18,
+	},
+	{
+		Models: []string{"gemini-2.5-flash", "gemini-2.5-flash-lite", "text-embedding-004", "gemini-embedding-001"},
+		Weight: 14,
+	},
+	{
+		Models: []string{"gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-image", "imagen-4.0-generate-001"},
+		Weight: 12,
+	},
+	{
+		Models: []string{"gemini-2.5-flash", "imagen-4.0-generate-001", "imagen-4.0-fast-generate-001"},
+		Weight: 9,
+	},
+	{
+		Models: []string{"gemini-2.5-flash", "gemini-2.5-pro", "veo-3.0-generate-001", "veo-3.0-fast-generate-001"},
+		Weight: 7,
+	},
+	{
+		Models: []string{"gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash"},
+		Weight: 10,
+	},
+	{
+		Models: []string{"gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash"},
+		Weight: 6,
 	},
 }
 
@@ -115,7 +189,7 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 	}
 
 	rng := rand.New(rand.NewSource(options.Seed))
-	statuses := buildStatuses(options.Count, rng, randomAutoDisable)
+	timeline := buildPoolTimeline(options.Count, rng, options.Now, randomAutoDisable, options.RandomDisableStartTime, options.RandomDisableEndTime)
 	names := make(map[string]struct{}, options.Count)
 	settings, err := vertexJSONSettings()
 	if err != nil {
@@ -125,29 +199,29 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 	channels := make([]model.Channel, 0, options.Count)
 	stats := Stats{Count: options.Count}
 	for i := 0; i < options.Count; i++ {
-		status := statuses[i]
+		entry := timeline[i]
+		status := entry.Status
 		if status == common.ChannelStatusEnabled {
 			stats.Enabled++
 		} else {
 			stats.AutoDisabled++
 		}
 
-		name := randomUUIDName(rng, names)
+		region := pickWeightedString(rng, vertexDefaultRegions)
+		name := randomChannelName(rng, names, region, i)
 		key, err := generateServiceAccountKey(rng, name, i)
 		if err != nil {
 			return nil, Stats{}, err
 		}
-		other, err := otherJSON(pickWeightedString(rng, vertexDefaultRegions))
+		other, err := otherJSON(region)
 		if err != nil {
 			return nil, Stats{}, err
 		}
-		otherInfo, err := statusInfoJSON(rng, status, options.Now, options.RandomDisableStartTime, options.RandomDisableEndTime)
+		otherInfo, err := statusInfoJSON(rng, status, entry.StatusTime)
 		if err != nil {
 			return nil, Stats{}, err
 		}
 
-		createdAt := options.Now - int64(2*3600+rng.Intn(7*24*3600))
-		testAt := options.Now - int64(rng.Intn(36*3600))
 		weight := uint(model.GhostChannelMarker)
 		priority := int64(model.GhostChannelMarker)
 		autoBan := 1
@@ -159,8 +233,8 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 			Status:             status,
 			Name:               name,
 			Weight:             &weight,
-			CreatedTime:        createdAt,
-			TestTime:           testAt,
+			CreatedTime:        entry.CreatedTime,
+			TestTime:           entry.TestTime,
 			ResponseTime:       responseTime(rng, status, options.RandomResponseTime),
 			BaseURL:            nil,
 			Other:              other,
@@ -244,29 +318,49 @@ func normalizeModels(models string) []string {
 
 func pickModels(rng *rand.Rand, models []string) string {
 	if len(models) > 0 {
-		return strings.Join(models, ",")
+		return strings.Join(pickProvidedModelSubset(rng, models), ",")
 	}
-	return strings.Join(modelSets[rng.Intn(len(modelSets))], ",")
+	return strings.Join(pickDefaultModelSet(rng), ",")
 }
 
-func buildStatuses(count int, rng *rand.Rand, random bool) []int {
-	if !random {
-		statuses := make([]int, count)
-		for i := 0; i < count; i++ {
-			statuses[i] = common.ChannelStatusEnabled
-		}
-		return statuses
+func pickDefaultModelSet(rng *rand.Rand) []string {
+	total := 0
+	for _, modelSet := range defaultModelSets {
+		total += modelSet.Weight
 	}
+	pick := rng.Intn(total)
+	for _, modelSet := range defaultModelSets {
+		pick -= modelSet.Weight
+		if pick < 0 {
+			return append([]string(nil), modelSet.Models...)
+		}
+	}
+	return append([]string(nil), defaultModelSets[len(defaultModelSets)-1].Models...)
+}
 
-	statuses := make([]int, count)
-	for i := 0; i < count; i++ {
-		if rng.Intn(2) == 0 {
-			statuses[i] = common.ChannelStatusEnabled
-		} else {
-			statuses[i] = common.ChannelStatusAutoDisabled
+func pickProvidedModelSubset(rng *rand.Rand, models []string) []string {
+	if len(models) <= 2 {
+		return append([]string(nil), models...)
+	}
+	targetSize := 3 + rng.Intn(min(4, len(models)-2))
+	if targetSize > len(models) {
+		targetSize = len(models)
+	}
+	indexes := rng.Perm(len(models))[:targetSize]
+	seen := map[int]struct{}{}
+	for _, index := range indexes {
+		seen[index] = struct{}{}
+	}
+	result := make([]string, 0, targetSize)
+	for i, modelName := range models {
+		if _, ok := seen[i]; ok {
+			result = append(result, modelName)
 		}
 	}
-	return statuses
+	if !common.StringsContains(result, "gemini-2.5-flash") && common.StringsContains(models, "gemini-2.5-flash") && len(result) > 0 {
+		result[0] = "gemini-2.5-flash"
+	}
+	return result
 }
 
 func vertexJSONSettings() (string, error) {
@@ -285,14 +379,197 @@ func otherJSON(region string) (string, error) {
 	return string(bytes), nil
 }
 
-func statusInfoJSON(rng *rand.Rand, status int, now int64, randomDisableStartTime int64, randomDisableEndTime int64) (string, error) {
+func buildPoolTimeline(count int, rng *rand.Rand, now int64, randomAutoDisable bool, randomDisableStartTime int64, randomDisableEndTime int64) []poolTimelineEntry {
+	createdTimes := sequentialRandomCreatedTimes(rng, count, now)
+	entries := make([]poolTimelineEntry, count)
+	for i := 0; i < count; i++ {
+		entries[i] = poolTimelineEntry{
+			CreatedTime: createdTimes[i],
+			Status:      common.ChannelStatusEnabled,
+			StatusTime:  enabledStatusTime(rng, now, createdTimes[i]),
+		}
+	}
+
+	if randomAutoDisable {
+		assignAutoDisabledTimeline(entries, rng, now, randomDisableStartTime, randomDisableEndTime)
+	}
+
+	for i := range entries {
+		entries[i].TestTime = randomTestTime(rng, now, entries[i].CreatedTime, entries[i].Status, entries[i].StatusTime)
+	}
+	return entries
+}
+
+func sequentialRandomCreatedTimes(rng *rand.Rand, count int, now int64) []int64 {
+	if count <= 0 {
+		return nil
+	}
+
+	historyDays := 45 + rng.Intn(116)
+	start := now - int64(historyDays*24*3600+rng.Intn(18*3600))
+	end := now - int64(10*60+rng.Intn(18*3600))
+	if end <= start {
+		end = start + int64(count)
+	}
+
+	return sequentialRandomTimes(rng, count, start, end)
+}
+
+func enabledStatusTime(rng *rand.Rand, now int64, createdAt int64) int64 {
+	statusTime := now - int64(rng.Intn(5*24*3600))
+	if statusTime < createdAt {
+		statusTime = createdAt + int64(rng.Intn(3600))
+	}
+	if statusTime > now {
+		return now
+	}
+	return statusTime
+}
+
+func assignAutoDisabledTimeline(entries []poolTimelineEntry, rng *rand.Rand, now int64, randomDisableStartTime int64, randomDisableEndTime int64) {
+	_, disableEnd := disableTimelineRange(now, randomDisableStartTime, randomDisableEndTime)
+	candidates := make([]int, 0, len(entries)/2)
+	for i := range entries {
+		if entries[i].CreatedTime+30*60 > disableEnd {
+			continue
+		}
+		if shouldAutoDisableEntry(rng, entries[i].CreatedTime, disableEnd, i, len(entries)) {
+			candidates = append(candidates, i)
+		}
+	}
+
+	if len(candidates) == 0 {
+		if index, ok := randomEligibleAutoDisableIndex(entries, rng, disableEnd); ok {
+			candidates = append(candidates, index)
+		}
+	}
+
+	rng.Shuffle(len(candidates), func(i, j int) {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
+	})
+	statusTimes := SequentialStatusTimes(len(candidates), rng, now, randomDisableStartTime, randomDisableEndTime)
+	for i, index := range candidates {
+		statusTime := statusTimes[i]
+		minStatusTime := entries[index].CreatedTime + 30*60
+		if statusTime < minStatusTime {
+			statusTime = minStatusTime
+		}
+		entries[index].StatusTime = statusTime
+		entries[index].Status = common.ChannelStatusAutoDisabled
+	}
+}
+
+func randomEligibleAutoDisableIndex(entries []poolTimelineEntry, rng *rand.Rand, disableEnd int64) (int, bool) {
+	eligible := make([]int, 0, len(entries))
+	for i := 0; i < len(entries); i++ {
+		if entries[i].CreatedTime+30*60 <= disableEnd {
+			eligible = append(eligible, i)
+		}
+	}
+	if len(eligible) == 0 {
+		return 0, false
+	}
+	return eligible[rng.Intn(len(eligible))], true
+}
+
+func shouldAutoDisableEntry(rng *rand.Rand, createdAt int64, statusTime int64, index int, count int) bool {
+	ageDays := int((statusTime - createdAt) / (24 * 3600))
+	probability := 32
+	switch {
+	case ageDays >= 90:
+		probability += 24
+	case ageDays >= 60:
+		probability += 18
+	case ageDays >= 30:
+		probability += 12
+	case ageDays >= 14:
+		probability += 6
+	}
+	if count > 0 && index < count/5 {
+		probability += 4
+	}
+	if probability > 68 {
+		probability = 68
+	}
+	return rng.Intn(100) < probability
+}
+
+func SequentialStatusTimes(count int, rng *rand.Rand, now int64, randomDisableStartTime int64, randomDisableEndTime int64) []int64 {
+	if rng == nil {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+	start, end := disableTimelineRange(now, randomDisableStartTime, randomDisableEndTime)
+	return sequentialRandomTimes(rng, count, start, end)
+}
+
+func disableTimelineRange(now int64, randomDisableStartTime int64, randomDisableEndTime int64) (int64, int64) {
+	if randomDisableStartTime > 0 && randomDisableEndTime >= randomDisableStartTime {
+		return randomDisableStartTime, randomDisableEndTime
+	}
+	return now - 5*24*3600, now
+}
+
+func sequentialRandomTimes(rng *rand.Rand, count int, start int64, end int64) []int64 {
+	if count <= 0 {
+		return nil
+	}
+	if rng == nil {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+	if end <= start {
+		end = start + int64(count)
+	}
+	if count == 1 {
+		if end == start {
+			return []int64{start}
+		}
+		return []int64{start + (end-start)/2}
+	}
+	if end-start < int64(count-1) {
+		end = start + int64(count-1)
+	}
+
+	weights := make([]float64, count-1)
+	total := 0.0
+	for i := range weights {
+		weight := math.Exp(rng.NormFloat64() * 0.9)
+		if rng.Intn(100) < 6 {
+			weight *= 2.5 + rng.Float64()*4
+		}
+		weights[i] = weight
+		total += weight
+	}
+
+	times := make([]int64, count)
+	times[0] = start
+	previous := start
+	cumulative := 0.0
+	span := float64(end - start)
+	for i := 1; i < count; i++ {
+		cumulative += weights[i-1]
+		next := start + int64(math.Round(span*cumulative/total))
+		if next <= previous {
+			next = previous + 1
+		}
+		latest := end - int64(count-1-i)
+		if next > latest {
+			next = latest
+		}
+		times[i] = next
+		previous = next
+	}
+	times[count-1] = end
+	return times
+}
+
+func statusInfoJSON(rng *rand.Rand, status int, statusTime int64) (string, error) {
 	reason := ""
 	if status != common.ChannelStatusEnabled {
 		reason = RandomStatusReason(rng)
 	}
 	bytes, err := common.Marshal(map[string]any{
 		"status_reason": reason,
-		"status_time":   RandomStatusTime(rng, now, randomDisableStartTime, randomDisableEndTime),
+		"status_time":   statusTime,
 	})
 	if err != nil {
 		return "", err
@@ -329,9 +606,20 @@ func RandomStatusReason(rng *rand.Rand) string {
 
 func responseTime(rng *rand.Rand, status int, random bool) int {
 	if !random {
-		return 0
+		return stableResponseTime(rng, status)
 	}
 	return randomResponseTime(rng, status)
+}
+
+func stableResponseTime(rng *rand.Rand, status int) int {
+	if status != common.ChannelStatusEnabled && rng.Intn(100) < 40 {
+		return 0
+	}
+	base := 420 + rng.Intn(520)
+	if rng.Intn(100) < 8 {
+		base += 500 + rng.Intn(900)
+	}
+	return base
 }
 
 func randomResponseTime(rng *rand.Rand, status int) int {
@@ -367,19 +655,35 @@ func randomUsedQuota(rng *rand.Rand) int64 {
 
 func usedQuota(rng *rand.Rand, random bool) int64 {
 	if !random {
-		return 0
+		return baselineUsedQuota(rng)
 	}
 	return randomUsedQuota(rng)
 }
 
+func baselineUsedQuota(rng *rand.Rand) int64 {
+	if rng.Intn(100) < 12 {
+		return int64(rng.Intn(700_000))
+	}
+	value := int64(math.Round(math.Exp(math.Log(18_000_000) + rng.NormFloat64()*0.9)))
+	if value < 250_000 {
+		return int64(250_000 + rng.Intn(1_000_000))
+	}
+	if value > 180_000_000 {
+		return int64(120_000_000 + rng.Intn(60_000_000))
+	}
+	return value + int64(rng.Intn(900_000))
+}
+
 func generateServiceAccountKey(rng *rand.Rand, channelName string, index int) (string, error) {
 	projectNumber := 100000000000 + rng.Int63n(900000000000)
-	projectID := fmt.Sprintf("gemini-ent-%06d", 100000+rng.Intn(900000))
+	projectID := randomProjectID(rng)
 	accountName := sanitizeAccountName(channelName)
 	if accountName == "" {
-		accountName = "gemini-channel"
+		accountName = "vertex-channel"
 	}
-	accountName = fmt.Sprintf("%s-%04d", accountName, index%10000)
+	if rng.Intn(100) < 70 {
+		accountName = fmt.Sprintf("%s-%04d", accountName, index%10000)
+	}
 	clientEmail := fmt.Sprintf("%s@%s.iam.gserviceaccount.com", accountName, projectID)
 
 	key := serviceAccountKey{
@@ -402,24 +706,115 @@ func generateServiceAccountKey(rng *rand.Rand, channelName string, index int) (s
 	return string(bytes), nil
 }
 
-func randomUUIDName(rng *rand.Rand, seen map[string]struct{}) string {
-	for tries := 0; tries < 50; tries++ {
-		var id uuid.UUID
-		for i := range id {
-			id[i] = byte(rng.Intn(256))
-		}
-		id[6] = (id[6] & 0x0f) | 0x40
-		id[8] = (id[8] & 0x3f) | 0x80
+func randomProjectID(rng *rand.Rand) string {
+	prefix := pickWeightedString(rng, projectPrefixes)
+	word := pickWeightedString(rng, projectWords)
+	number := 1000 + rng.Intn(900000)
+	switch rng.Intn(4) {
+	case 0:
+		return fmt.Sprintf("%s-%06d", prefix, number)
+	case 1:
+		return fmt.Sprintf("%s-%s-%04d", prefix, word, number%10000)
+	case 2:
+		return fmt.Sprintf("%s-%s", prefix, randomString(rng, "abcdefghijklmnopqrstuvwxyz0123456789", 6))
+	default:
+		return fmt.Sprintf("%s-%s-%05d", word, prefix, number%100000)
+	}
+}
 
-		name := id.String()
+func randomChannelName(rng *rand.Rand, seen map[string]struct{}, region string, index int) string {
+	for tries := 0; tries < 50; tries++ {
+		prefix := pickWeightedString(rng, channelNamePrefixes)
+		role := pickWeightedString(rng, channelNameRoles)
+		env := pickWeightedString(rng, []weightedString{
+			{Value: "prod", Weight: 48},
+			{Value: "prd", Weight: 18},
+			{Value: "shared", Weight: 14},
+			{Value: "stable", Weight: 10},
+			{Value: "online", Weight: 6},
+			{Value: "canary", Weight: 4},
+		})
+		regionCode := shortRegion(region)
+		randomSuffix := randomString(rng, "abcdefghijklmnopqrstuvwxyz0123456789", 4)
+		number := 1 + rng.Intn(999)
+
+		var name string
+		switch rng.Intn(7) {
+		case 0:
+			name = fmt.Sprintf("%s-%s-%s-%03d", prefix, role, regionCode, number)
+		case 1:
+			name = fmt.Sprintf("%s-%s-%s", prefix, env, randomSuffix)
+		case 2:
+			name = fmt.Sprintf("%s-%s-%s-%02d", role, prefix, regionCode, 1+rng.Intn(80))
+		case 3:
+			name = fmt.Sprintf("%s-%s-%s", prefix, regionCode, randomSuffix)
+		case 4:
+			name = fmt.Sprintf("%s-%s-%03d", env, role, number)
+		case 5:
+			name = fmt.Sprintf("%s-%s-%s", prefix, role, randomSuffix)
+		default:
+			name = fmt.Sprintf("%s-%s-%04d", prefix, role, (index+rng.Intn(7000))%10000)
+		}
 		if _, ok := seen[name]; !ok {
 			seen[name] = struct{}{}
 			return name
 		}
 	}
-	name := uuid.NewString()
+	name := fmt.Sprintf("vertex-prod-%s-%04d", shortRegion(region), index)
 	seen[name] = struct{}{}
 	return name
+}
+
+func shortRegion(region string) string {
+	parts := strings.Split(region, "-")
+	if len(parts) == 0 || parts[0] == "" {
+		return "global"
+	}
+	if region == "global" {
+		return "global"
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	last := parts[len(parts)-1]
+	if len(last) > 1 {
+		last = last[len(last)-1:]
+	}
+	return strings.Join(parts[:len(parts)-1], "") + last
+}
+
+func randomTestTime(rng *rand.Rand, now int64, createdAt int64, status int, statusTime int64) int64 {
+	var testAt int64
+	if status != common.ChannelStatusEnabled {
+		offset := int64(rng.Intn(12 * 3600))
+		if statusTime > offset {
+			testAt = statusTime - offset
+		} else {
+			testAt = statusTime
+		}
+	} else {
+		ageSeconds := int64(math.Round(math.Exp(math.Log(8*3600) + rng.NormFloat64()*1.05)))
+		if ageSeconds < 5*60 {
+			ageSeconds = int64(5*60 + rng.Intn(55*60))
+		}
+		if ageSeconds > 12*24*3600 {
+			ageSeconds = int64(2*24*3600 + rng.Intn(10*24*3600))
+		}
+		testAt = now - ageSeconds
+	}
+	if testAt < createdAt {
+		testAt = createdAt + int64(rng.Intn(24*3600))
+	}
+	if testAt > now {
+		if now <= createdAt {
+			return createdAt
+		}
+		testAt = createdAt + rng.Int63n(now-createdAt+1)
+	}
+	if testAt < createdAt {
+		testAt = createdAt
+	}
+	return testAt
 }
 
 func randomPrivateKeyPEM(rng *rand.Rand) string {

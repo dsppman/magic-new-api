@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"fmt"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -60,11 +62,17 @@ func GenerateGhostChannels(c *gin.Context) {
 		seed = *req.Seed
 	}
 
+	models, err := resolveGhostChannelModels(req.Models)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
 	channels, stats, err := ghostchannel.Generate(ghostchannel.Options{
 		Count:                  req.Count,
 		Seed:                   seed,
 		Tag:                    ghostchannel.DefaultTag,
-		Models:                 req.Models,
+		Models:                 models,
 		Group:                  req.Group,
 		Groups:                 req.Groups,
 		RandomUsedQuota:        req.RandomUsedQuota,
@@ -107,6 +115,65 @@ func GenerateGhostChannels(c *gin.Context) {
 	})
 }
 
+func resolveGhostChannelModels(requestedModels string) (string, error) {
+	upstreamChannel, err := model.GetChannelById(model.GhostChannelUpstreamId, true)
+	if err != nil {
+		return "", fmt.Errorf("获取影子上游渠道 #%d 失败: %w", model.GhostChannelUpstreamId, err)
+	}
+
+	upstreamModels := splitGhostModelNames(upstreamChannel.Models)
+	if len(upstreamModels) == 0 {
+		return "", fmt.Errorf("影子上游渠道 #%d 未配置模型", model.GhostChannelUpstreamId)
+	}
+
+	requested := splitGhostModelNames(requestedModels)
+	if len(requested) == 0 {
+		return strings.Join(upstreamModels, ","), nil
+	}
+
+	upstreamSet := make(map[string]struct{}, len(upstreamModels))
+	for _, modelName := range upstreamModels {
+		upstreamSet[modelName] = struct{}{}
+	}
+
+	result := make([]string, 0, len(requested))
+	seen := map[string]struct{}{}
+	for _, modelName := range requested {
+		if _, ok := upstreamSet[modelName]; !ok {
+			continue
+		}
+		if _, ok := seen[modelName]; ok {
+			continue
+		}
+		seen[modelName] = struct{}{}
+		result = append(result, modelName)
+	}
+	if len(result) == 0 {
+		return "", fmt.Errorf("填写的模型均不在影子上游渠道 #%d 的模型列表中", model.GhostChannelUpstreamId)
+	}
+	return strings.Join(result, ","), nil
+}
+
+func splitGhostModelNames(models string) []string {
+	parts := strings.FieldsFunc(models, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
+	result := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		modelName := strings.TrimSpace(part)
+		if modelName == "" {
+			continue
+		}
+		if _, ok := seen[modelName]; ok {
+			continue
+		}
+		seen[modelName] = struct{}{}
+		result = append(result, modelName)
+	}
+	return result
+}
+
 func validateRandomDisableTimeRange(startTime int64, endTime int64) (int64, int64, string) {
 	if startTime == 0 && endTime == 0 {
 		return 0, 0, ""
@@ -140,35 +207,41 @@ func RandomDisableGhostChannels(c *gin.Context) {
 		return
 	}
 
-	var channelIds []int
-	if err := model.ApplyGhostChannelFilter(model.DB.Model(&model.Channel{})).
-		Where("status = ?", common.ChannelStatusEnabled).
-		Pluck("id", &channelIds).Error; err != nil {
+	now := common.GetTimestamp()
+	disableEndTime := now
+	if randomDisableEndTime > 0 {
+		disableEndTime = randomDisableEndTime
+	}
+	var candidates []model.Channel
+	query := model.ApplyGhostChannelFilter(model.DB.Model(&model.Channel{})).
+		Select("id", "created_time").
+		Where("status = ?", common.ChannelStatusEnabled)
+	query = query.Where("created_time = 0 OR created_time <= ?", disableEndTime-30*60)
+	if err := query.Find(&candidates).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	rng.Shuffle(len(channelIds), func(i, j int) {
-		channelIds[i], channelIds[j] = channelIds[j], channelIds[i]
+	rng.Shuffle(len(candidates), func(i, j int) {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
 	})
-
 	limit := req.Count
-	if limit > len(channelIds) {
-		limit = len(channelIds)
+	if limit > len(candidates) {
+		limit = len(candidates)
 	}
-	now := common.GetTimestamp()
 	statusTime := now
 	statusTimeMin := int64(0)
 	statusTimeMax := int64(0)
 	disabled := 0
-	for _, channelId := range channelIds[:limit] {
+	statusTimes := ghostchannel.SequentialStatusTimes(limit, rng, now, randomDisableStartTime, randomDisableEndTime)
+	for i, channel := range candidates[:limit] {
 		reason := ghostchannel.RandomStatusReason(rng)
-		channelStatusTime := statusTime
-		if randomDisableStartTime > 0 {
-			channelStatusTime = ghostchannel.RandomStatusTime(rng, now, randomDisableStartTime, randomDisableEndTime)
+		channelStatusTime := statusTimes[i]
+		if channel.CreatedTime > 0 && channelStatusTime < channel.CreatedTime+30*60 {
+			channelStatusTime = channel.CreatedTime + 30*60
 		}
-		if model.UpdateChannelStatusWithTimestamp(channelId, common.ChannelStatusAutoDisabled, reason, channelStatusTime) {
+		if model.UpdateChannelStatusWithTimestamp(channel.Id, common.ChannelStatusAutoDisabled, reason, channelStatusTime) {
 			disabled++
 			if statusTimeMin == 0 || channelStatusTime < statusTimeMin {
 				statusTimeMin = channelStatusTime
@@ -181,7 +254,7 @@ func RandomDisableGhostChannels(c *gin.Context) {
 
 	recordManageAudit(c, "channel.random_auto_disable", map[string]interface{}{
 		"requested":                 req.Count,
-		"available":                 len(channelIds),
+		"available":                 len(candidates),
 		"disabled":                  disabled,
 		"status_time":               statusTime,
 		"status_time_min":           statusTimeMin,
@@ -195,7 +268,7 @@ func RandomDisableGhostChannels(c *gin.Context) {
 		"message": "",
 		"data": gin.H{
 			"requested":                 req.Count,
-			"available":                 len(channelIds),
+			"available":                 len(candidates),
 			"disabled":                  disabled,
 			"status_time":               statusTime,
 			"status_time_min":           statusTimeMin,
