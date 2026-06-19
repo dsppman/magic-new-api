@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/google/uuid"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,7 @@ func TestGenerateDefaultVertexChannels(t *testing.T) {
 	assert.Equal(t, DefaultCount, stats.Enabled)
 	assert.Zero(t, stats.AutoDisabled)
 
-	seenEmails := make(map[string]struct{}, len(channels))
+	seenNames := make(map[string]struct{}, len(channels))
 	regionSet := knownRegionSet()
 	for _, channel := range channels {
 		assert.Zero(t, channel.Id)
@@ -35,11 +36,13 @@ func TestGenerateDefaultVertexChannels(t *testing.T) {
 		assert.Zero(t, channel.ResponseTime)
 		assert.Zero(t, channel.UsedQuota)
 		assert.Equal(t, DefaultTag, *channel.Tag)
-		assert.Contains(t, channel.Name, "@gmail.com")
-		if _, ok := seenEmails[channel.Name]; ok {
-			t.Fatalf("duplicate email: %s", channel.Name)
+		parsedName, err := uuid.Parse(channel.Name)
+		require.NoError(t, err)
+		assert.Equal(t, 4, int(parsedName.Version()))
+		if _, ok := seenNames[channel.Name]; ok {
+			t.Fatalf("duplicate channel UUID: %s", channel.Name)
 		}
-		seenEmails[channel.Name] = struct{}{}
+		seenNames[channel.Name] = struct{}{}
 
 		var key map[string]any
 		require.NoError(t, common.Unmarshal([]byte(channel.Key), &key))

@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -382,7 +383,9 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 			continue
 		}
 		newGenerated++
-		assert.Contains(t, channel.Name, "@gmail.com")
+		parsedName, err := uuid.Parse(channel.Name)
+		require.NoError(t, err)
+		assert.Equal(t, 4, int(parsedName.Version()))
 		assert.Equal(t, "gemini-2.5-flash,gemini-2.5-pro", channel.Models)
 		assert.Equal(t, "vip,default", channel.Group)
 		assert.Greater(t, channel.UsedQuota, int64(0))

@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/google/uuid"
 )
 
 const (
@@ -73,25 +74,6 @@ var vertexDefaultRegions = []weightedString{
 	{Value: "us-west4", Weight: 7},
 }
 
-var firstNames = []string{
-	"anh", "bao", "binh", "chi", "cong", "cuong", "dat", "duc", "duy", "giang",
-	"hai", "hanh", "hieu", "hoa", "hoai", "hoang", "huy", "khanh", "khoa", "lam",
-	"lan", "linh", "long", "mai", "minh", "nam", "ngoc", "nhan", "phuc", "quang",
-	"son", "tai", "thao", "thanh", "thien", "trang", "tri", "tue", "tuan", "viet",
-	"yen", "alice", "brian", "carlos", "daniel", "emily", "grace", "hannah", "jason",
-	"kevin", "laura", "michael", "natalie", "olivia", "rachel", "sophia", "steven",
-}
-
-var lastNames = []string{
-	"nguyen", "tran", "le", "pham", "hoang", "huynh", "vu", "vo", "dang", "bui",
-	"do", "phan", "truong", "ngo", "dinh", "ly", "mai", "doan", "cao", "luu",
-	"lam", "trinh", "ta", "mac", "benally", "wurth", "garcia", "miller", "davis",
-	"brown", "wilson", "thomas", "martin", "clark", "lee", "walker", "hall", "allen",
-	"young",
-}
-
-var middleNames = []string{"van", "thi", "minh", "quoc", "thanh", "hoang", "duc", "huu", "gia", "nhat", "ngoc"}
-
 var modelSets = [][]string{
 	{
 		"gemini-2.5-flash",
@@ -127,7 +109,7 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 
 	rng := rand.New(rand.NewSource(options.Seed))
 	statuses := buildStatuses(options.Count, rng, options.RandomUsedQuota)
-	emails := make(map[string]struct{}, options.Count)
+	names := make(map[string]struct{}, options.Count)
 	settings, err := vertexJSONSettings()
 	if err != nil {
 		return nil, Stats{}, err
@@ -143,8 +125,8 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 			stats.AutoDisabled++
 		}
 
-		email := randomGmail(rng, emails)
-		key, err := generateServiceAccountKey(rng, email, i)
+		name := randomUUIDName(rng, names)
+		key, err := generateServiceAccountKey(rng, name, i)
 		if err != nil {
 			return nil, Stats{}, err
 		}
@@ -168,7 +150,7 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 			Type:               constant.ChannelTypeVertexAi,
 			Key:                key,
 			Status:             status,
-			Name:               email,
+			Name:               name,
 			Weight:             &weight,
 			CreatedTime:        createdAt,
 			TestTime:           testAt,
@@ -370,10 +352,10 @@ func usedQuota(rng *rand.Rand, random bool) int64 {
 	return randomUsedQuota(rng)
 }
 
-func generateServiceAccountKey(rng *rand.Rand, email string, index int) (string, error) {
+func generateServiceAccountKey(rng *rand.Rand, channelName string, index int) (string, error) {
 	projectNumber := 100000000000 + rng.Int63n(900000000000)
 	projectID := fmt.Sprintf("gemini-ent-%06d", 100000+rng.Intn(900000))
-	accountName := sanitizeAccountName(email)
+	accountName := sanitizeAccountName(channelName)
 	if accountName == "" {
 		accountName = "gemini-channel"
 	}
@@ -400,33 +382,24 @@ func generateServiceAccountKey(rng *rand.Rand, email string, index int) (string,
 	return string(bytes), nil
 }
 
-func randomGmail(rng *rand.Rand, seen map[string]struct{}) string {
+func randomUUIDName(rng *rand.Rand, seen map[string]struct{}) string {
 	for tries := 0; tries < 50; tries++ {
-		first := firstNames[rng.Intn(len(firstNames))]
-		last := lastNames[rng.Intn(len(lastNames))]
-		middle := middleNames[rng.Intn(len(middleNames))]
-		var local string
-		switch roll := rng.Intn(100); {
-		case roll < 26:
-			local = fmt.Sprintf("%s%s%d", first, last, 10+rng.Intn(9890))
-		case roll < 52:
-			local = fmt.Sprintf("%s.%s%d", first, last, 100+rng.Intn(900))
-		case roll < 70:
-			local = fmt.Sprintf("%s%s%d", last, first, 1000+rng.Intn(9000))
-		case roll < 86:
-			local = fmt.Sprintf("%s%s%s%d", first, middle, last, 10+rng.Intn(90))
-		default:
-			local = fmt.Sprintf("%s%s.%d", first, last, 1984+rng.Intn(23))
+		var id uuid.UUID
+		for i := range id {
+			id[i] = byte(rng.Intn(256))
 		}
-		email := local + "@gmail.com"
-		if _, ok := seen[email]; !ok {
-			seen[email] = struct{}{}
-			return email
+		id[6] = (id[6] & 0x0f) | 0x40
+		id[8] = (id[8] & 0x3f) | 0x80
+
+		name := id.String()
+		if _, ok := seen[name]; !ok {
+			seen[name] = struct{}{}
+			return name
 		}
 	}
-	email := fmt.Sprintf("user%d@gmail.com", 100000000+rng.Intn(900000000))
-	seen[email] = struct{}{}
-	return email
+	name := uuid.NewString()
+	seen[name] = struct{}{}
+	return name
 }
 
 func randomPrivateKeyPEM(rng *rand.Rand) string {
