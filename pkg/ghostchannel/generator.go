@@ -22,15 +22,18 @@ const (
 )
 
 type Options struct {
-	Count              int
-	Seed               int64
-	Tag                string
-	Now                int64
-	Models             string
-	Group              string
-	Groups             []string
-	RandomUsedQuota    bool
-	RandomResponseTime bool
+	Count                  int
+	Seed                   int64
+	Tag                    string
+	Now                    int64
+	Models                 string
+	Group                  string
+	Groups                 []string
+	RandomUsedQuota        bool
+	RandomAutoDisable      *bool
+	RandomDisableStartTime int64
+	RandomDisableEndTime   int64
+	RandomResponseTime     bool
 }
 
 type Stats struct {
@@ -106,9 +109,13 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 	}
 	models := normalizeModels(options.Models)
 	group := normalizeGroup(options.Group, options.Groups)
+	randomAutoDisable := options.RandomUsedQuota
+	if options.RandomAutoDisable != nil {
+		randomAutoDisable = *options.RandomAutoDisable
+	}
 
 	rng := rand.New(rand.NewSource(options.Seed))
-	statuses := buildStatuses(options.Count, rng, options.RandomUsedQuota)
+	statuses := buildStatuses(options.Count, rng, randomAutoDisable)
 	names := make(map[string]struct{}, options.Count)
 	settings, err := vertexJSONSettings()
 	if err != nil {
@@ -134,7 +141,7 @@ func Generate(options Options) ([]model.Channel, Stats, error) {
 		if err != nil {
 			return nil, Stats{}, err
 		}
-		otherInfo, err := statusInfoJSON(rng, status, options.Now)
+		otherInfo, err := statusInfoJSON(rng, status, options.Now, options.RandomDisableStartTime, options.RandomDisableEndTime)
 		if err != nil {
 			return nil, Stats{}, err
 		}
@@ -278,19 +285,32 @@ func otherJSON(region string) (string, error) {
 	return string(bytes), nil
 }
 
-func statusInfoJSON(rng *rand.Rand, status int, now int64) (string, error) {
+func statusInfoJSON(rng *rand.Rand, status int, now int64, randomDisableStartTime int64, randomDisableEndTime int64) (string, error) {
 	reason := ""
 	if status != common.ChannelStatusEnabled {
 		reason = RandomStatusReason(rng)
 	}
 	bytes, err := common.Marshal(map[string]any{
 		"status_reason": reason,
-		"status_time":   now - int64(rng.Intn(5*24*3600)),
+		"status_time":   RandomStatusTime(rng, now, randomDisableStartTime, randomDisableEndTime),
 	})
 	if err != nil {
 		return "", err
 	}
 	return string(bytes), nil
+}
+
+func RandomStatusTime(rng *rand.Rand, now int64, randomDisableStartTime int64, randomDisableEndTime int64) int64 {
+	if rng == nil {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+	if randomDisableStartTime > 0 && randomDisableEndTime >= randomDisableStartTime {
+		if randomDisableEndTime == randomDisableStartTime {
+			return randomDisableStartTime
+		}
+		return randomDisableStartTime + rng.Int63n(randomDisableEndTime-randomDisableStartTime+1)
+	}
+	return now - int64(rng.Intn(5*24*3600))
 }
 
 func RandomStatusReason(rng *rand.Rand) string {

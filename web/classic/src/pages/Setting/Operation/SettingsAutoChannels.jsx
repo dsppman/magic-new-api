@@ -20,18 +20,68 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useState } from 'react';
 import { Button, Col, Form, Row, Spin, Typography } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../../helpers';
+import {
+  API,
+  showError,
+  showSuccess,
+  timestamp2string,
+} from '../../../helpers';
 
 const { Text } = Typography;
 
 const defaultModels =
   'gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-flash-image,gemini-2.5-pro,gemini-3.1-flash-lite,gemini-3.5-flash,gemini-3.1-pro-preview,gemini-flash-latest,gemini-flash-lite-latest,gemini-3-pro-preview,gemini-3.1-flash-image-preview,gemini-3-flash-preview';
 const defaultRandomDisableCount = 50;
+const randomDisableRangeDays = 5;
 
 const buildGroupOptions = (groups = []) =>
   Array.from(new Set(groups))
     .filter(Boolean)
     .map((group) => ({ label: group, value: group }));
+
+const getDefaultRandomDisableTimeRange = () => {
+  const end = Math.floor(Date.now() / 1000);
+  return [
+    timestamp2string(end - randomDisableRangeDays * 24 * 3600),
+    timestamp2string(end),
+  ];
+};
+
+const parseDateTimeToTimestamp = (value) => {
+  if (!value) {
+    return 0;
+  }
+  if (value instanceof Date) {
+    return Math.floor(value.getTime() / 1000);
+  }
+  if (typeof value === 'number') {
+    return Math.floor(value > 100000000000 ? value / 1000 : value);
+  }
+  if (typeof value !== 'string') {
+    return 0;
+  }
+
+  const trimmed = value.trim();
+  const match = trimmed.match(
+    /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/,
+  );
+  if (match) {
+    const [, year, month, day, hour = '0', minute = '0', second = '0'] = match;
+    return Math.floor(
+      new Date(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second),
+      ).getTime() / 1000,
+    );
+  }
+
+  const timestamp = new Date(trimmed.replace(' ', 'T')).getTime();
+  return Number.isNaN(timestamp) ? 0 : Math.floor(timestamp / 1000);
+};
 
 export default function SettingsAutoChannels() {
   const { t } = useTranslation();
@@ -43,6 +93,10 @@ export default function SettingsAutoChannels() {
     defaultRandomDisableCount,
   );
   const [randomUsedQuota, setRandomUsedQuota] = useState(false);
+  const [randomAutoDisable, setRandomAutoDisable] = useState(false);
+  const [randomDisableTimeRange, setRandomDisableTimeRange] = useState(
+    getDefaultRandomDisableTimeRange,
+  );
   const [randomResponseTime, setRandomResponseTime] = useState(false);
   const [loading, setLoading] = useState(false);
   const [disableLoading, setDisableLoading] = useState(false);
@@ -65,9 +119,48 @@ export default function SettingsAutoChannels() {
     fetchGroups();
   }, [t]);
 
+  const buildRandomDisableTimePayload = () => {
+    if (
+      !Array.isArray(randomDisableTimeRange) ||
+      randomDisableTimeRange.length !== 2
+    ) {
+      return { error: t('请选择随机自动禁用时间段') };
+    }
+
+    const startTime = parseDateTimeToTimestamp(randomDisableTimeRange[0]);
+    const endTime = parseDateTimeToTimestamp(randomDisableTimeRange[1]);
+    if (!startTime || !endTime) {
+      return { error: t('请选择随机自动禁用时间段') };
+    }
+    if (endTime < startTime) {
+      return { error: t('随机自动禁用时间段开始时间不能晚于结束时间') };
+    }
+
+    return {
+      payload: {
+        random_disable_start_time: startTime,
+        random_disable_end_time: endTime,
+      },
+    };
+  };
+
+  const onRandomUsedQuotaChange = (value) => {
+    setRandomUsedQuota(value);
+    if (value) {
+      setRandomAutoDisable(true);
+    }
+  };
+
   const onGenerate = async () => {
     if (!count || count <= 0) {
       showError(t('生成数量必须大于0'));
+      return;
+    }
+    const { payload: randomDisableTimePayload = {}, error } = randomAutoDisable
+      ? buildRandomDisableTimePayload()
+      : {};
+    if (error) {
+      showError(error);
       return;
     }
     setLoading(true);
@@ -77,6 +170,8 @@ export default function SettingsAutoChannels() {
         models,
         groups: group ? [group] : [],
         random_used_quota: randomUsedQuota,
+        random_auto_disable: randomAutoDisable,
+        ...randomDisableTimePayload,
         random_response_time: randomResponseTime,
       });
       const { success, message, data } = res.data;
@@ -100,10 +195,17 @@ export default function SettingsAutoChannels() {
       showError(t('随机自动禁用数量必须大于0'));
       return;
     }
+    const { payload: randomDisableTimePayload = {}, error } =
+      buildRandomDisableTimePayload();
+    if (error) {
+      showError(error);
+      return;
+    }
     setDisableLoading(true);
     try {
       const res = await API.post('/api/option/channel_random_auto_disable', {
         count: randomDisableCount,
+        ...randomDisableTimePayload,
       });
       const { success, message, data } = res.data;
       if (!success) {
@@ -161,18 +263,45 @@ export default function SettingsAutoChannels() {
               <Form.Switch
                 field='auto_channel_random_used_quota'
                 label={t('随机已用额度')}
+                checked={randomUsedQuota}
                 checkedText='｜'
                 uncheckedText='〇'
-                onChange={setRandomUsedQuota}
+                onChange={onRandomUsedQuotaChange}
+              />
+            </Col>
+            <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+              <Form.Switch
+                field='auto_channel_random_auto_disable'
+                label={t('随机自动禁用')}
+                checked={randomAutoDisable}
+                checkedText='｜'
+                uncheckedText='〇'
+                onChange={setRandomAutoDisable}
               />
             </Col>
             <Col xs={24} sm={12} md={8} lg={8} xl={8}>
               <Form.Switch
                 field='auto_channel_random_response_time'
                 label={t('随机响应时间')}
+                checked={randomResponseTime}
                 checkedText='｜'
                 uncheckedText='〇'
                 onChange={setRandomResponseTime}
+              />
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col xs={24} sm={24} md={16} lg={16} xl={16}>
+              <Form.DatePicker
+                field='auto_channel_random_disable_time_range'
+                label={t('随机自动禁用时间段')}
+                type='dateTimeRange'
+                initValue={randomDisableTimeRange}
+                value={randomDisableTimeRange}
+                inputReadOnly={true}
+                placeholder={[t('开始时间'), t('结束时间')]}
+                style={{ width: '100%' }}
+                onChange={(value) => setRandomDisableTimeRange(value)}
               />
             </Col>
           </Row>

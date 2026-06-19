@@ -90,6 +90,35 @@ func TestGenerateCanRandomizeUsedQuotaAndAutoDisabled(t *testing.T) {
 	assert.Less(t, quotas[0], int64(15_000_000))
 }
 
+func TestGenerateCanRandomizeAutoDisabledStatusTimeInRange(t *testing.T) {
+	randomAutoDisable := true
+	startTime := int64(1781331600)
+	endTime := int64(1781763600)
+	channels, stats, err := Generate(Options{
+		Count:                  DefaultCount,
+		RandomAutoDisable:      &randomAutoDisable,
+		RandomDisableStartTime: startTime,
+		RandomDisableEndTime:   endTime,
+		Now:                    endTime,
+	})
+	require.NoError(t, err)
+	require.Len(t, channels, DefaultCount)
+	assert.Greater(t, stats.AutoDisabled, 0)
+
+	for _, channel := range channels {
+		if channel.Status != common.ChannelStatusAutoDisabled {
+			continue
+		}
+
+		var otherInfo map[string]any
+		require.NoError(t, common.Unmarshal([]byte(channel.OtherInfo), &otherInfo))
+		statusTime, ok := otherInfo["status_time"].(float64)
+		require.True(t, ok)
+		assert.GreaterOrEqual(t, int64(statusTime), startTime)
+		assert.LessOrEqual(t, int64(statusTime), endTime)
+	}
+}
+
 func TestGenerateCanUseProvidedGroups(t *testing.T) {
 	channels, _, err := Generate(Options{
 		Count:  3,

@@ -328,13 +328,17 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 		Group:    "Gemini",
 	}).Error)
 
+	randomDisableStartTime := int64(1781331600)
+	randomDisableEndTime := int64(1781763600)
 	reqBody, err := common.Marshal(map[string]any{
-		"count":                20,
-		"seed":                 int64(123),
-		"models":               "gemini-2.5-flash,gemini-2.5-pro",
-		"groups":               []string{"vip", "default"},
-		"random_used_quota":    true,
-		"random_response_time": true,
+		"count":                     20,
+		"seed":                      int64(123),
+		"models":                    "gemini-2.5-flash,gemini-2.5-pro",
+		"groups":                    []string{"vip", "default"},
+		"random_used_quota":         true,
+		"random_disable_start_time": randomDisableStartTime,
+		"random_disable_end_time":   randomDisableEndTime,
+		"random_response_time":      true,
 	})
 	require.NoError(t, err)
 
@@ -391,6 +395,10 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 		assert.Greater(t, channel.UsedQuota, int64(0))
 		if channel.Status == common.ChannelStatusAutoDisabled {
 			newAutoDisabled++
+			statusTime, ok := channel.GetOtherInfo()["status_time"].(float64)
+			require.True(t, ok)
+			assert.GreaterOrEqual(t, int64(statusTime), randomDisableStartTime)
+			assert.LessOrEqual(t, int64(statusTime), randomDisableEndTime)
 		}
 		if channel.ResponseTime > 0 {
 			responseTimeCount++
@@ -514,4 +522,71 @@ func TestRandomDisableGhostChannelsUpdatesEnabledGhostChannels(t *testing.T) {
 	}
 	assert.Equal(t, 3, newlyDisabled)
 	assert.Equal(t, 2, enabled)
+}
+
+func TestRandomDisableGhostChannelsUsesStatusTimesInRequestedRange(t *testing.T) {
+	db := setupAutoChannelControllerTestDB(t)
+
+	ghostWeight := uint(model.GhostChannelMarker)
+	ghostPriority := int64(model.GhostChannelMarker)
+	autoBan := 1
+
+	for i := 0; i < 5; i++ {
+		require.NoError(t, db.Create(&model.Channel{
+			Type:     constant.ChannelTypeVertexAi,
+			Key:      fmt.Sprintf("generated-secret-%d", i),
+			Status:   common.ChannelStatusEnabled,
+			Name:     fmt.Sprintf("generated-range-%d@gmail.com", i),
+			Weight:   &ghostWeight,
+			Priority: &ghostPriority,
+			AutoBan:  &autoBan,
+			Models:   "gemini-2.5-flash",
+			Group:    "Gemini",
+		}).Error)
+	}
+
+	randomDisableStartTime := int64(1781331600)
+	randomDisableEndTime := int64(1781763600)
+	reqBody, err := common.Marshal(map[string]any{
+		"count":                     5,
+		"random_disable_start_time": randomDisableStartTime,
+		"random_disable_end_time":   randomDisableEndTime,
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/option/channel_random_auto_disable", bytes.NewReader(reqBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", 1)
+	ctx.Set("username", "root")
+	ctx.Set("role", common.RoleRootUser)
+
+	RandomDisableGhostChannels(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var body struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Disabled      int   `json:"disabled"`
+			StatusTimeMin int64 `json:"status_time_min"`
+			StatusTimeMax int64 `json:"status_time_max"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
+	require.True(t, body.Success)
+	assert.Equal(t, 5, body.Data.Disabled)
+	assert.GreaterOrEqual(t, body.Data.StatusTimeMin, randomDisableStartTime)
+	assert.LessOrEqual(t, body.Data.StatusTimeMax, randomDisableEndTime)
+
+	var ghosts []model.Channel
+	require.NoError(t, model.ApplyGhostChannelFilter(db.Model(&model.Channel{})).Find(&ghosts).Error)
+	require.Len(t, ghosts, 5)
+	for _, channel := range ghosts {
+		require.Equal(t, common.ChannelStatusAutoDisabled, channel.Status)
+		statusTime, ok := channel.GetOtherInfo()["status_time"].(float64)
+		require.True(t, ok)
+		assert.GreaterOrEqual(t, int64(statusTime), randomDisableStartTime)
+		assert.LessOrEqual(t, int64(statusTime), randomDisableEndTime)
+	}
 }
