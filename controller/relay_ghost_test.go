@@ -11,25 +11,32 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestProcessChannelErrorMasksGhostAutoDisableReason(t *testing.T) {
+func TestProcessChannelErrorUsesMappedGhostErrorForAutoDisable(t *testing.T) {
 	db := setupAutoChannelControllerTestDB(t)
 
 	oldAutomaticDisable := common.AutomaticDisableChannelEnabled
 	oldMemoryCache := common.MemoryCacheEnabled
 	oldErrorLogEnabled := constant.ErrorLogEnabled
+	oldAutomaticDisableStatusCodeRanges := operation_setting.AutomaticDisableStatusCodeRanges
+	oldAutomaticDisableKeywords := operation_setting.AutomaticDisableKeywords
 	common.AutomaticDisableChannelEnabled = true
 	common.MemoryCacheEnabled = false
 	constant.ErrorLogEnabled = false
+	operation_setting.AutomaticDisableStatusCodeRanges = []operation_setting.StatusCodeRange{{Start: http.StatusUnauthorized, End: http.StatusUnauthorized}}
+	operation_setting.AutomaticDisableKeywords = nil
 	t.Cleanup(func() {
 		common.AutomaticDisableChannelEnabled = oldAutomaticDisable
 		common.MemoryCacheEnabled = oldMemoryCache
 		constant.ErrorLogEnabled = oldErrorLogEnabled
+		operation_setting.AutomaticDisableStatusCodeRanges = oldAutomaticDisableStatusCodeRanges
+		operation_setting.AutomaticDisableKeywords = oldAutomaticDisableKeywords
 	})
 
 	ghostWeight := uint(model.GhostChannelMarker)
@@ -56,7 +63,7 @@ func TestProcessChannelErrorMasksGhostAutoDisableReason(t *testing.T) {
 	rawErr := types.NewOpenAIError(
 		errors.New("Gemini invalid_api_key x-goog-api-key"),
 		types.ErrorCodeBadResponseStatusCode,
-		http.StatusUnauthorized,
+		http.StatusInternalServerError,
 	)
 	processChannelError(ctx, *types.NewChannelError(channel.Id, channel.Type, channel.Name, false, "", true), rawErr)
 

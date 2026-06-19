@@ -356,16 +356,21 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
 	visibleErr := service.MaskGhostVertexAPIError(c, err)
-	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
+	effectiveErr := err
+	if service.IsGhostChannelRelay(c) {
+		effectiveErr = visibleErr
+	}
+	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, effectiveErr.StatusCode, common.LocalLogPreview(effectiveErr.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if service.ShouldDisableChannel(err) && channelError.AutoBan {
+	shouldDisable := service.ShouldDisableChannel(effectiveErr)
+	if shouldDisable && channelError.AutoBan {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, visibleErr.ErrorWithStatusCode())
 		})
 	}
 
-	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {
+	if constant.ErrorLogEnabled && types.IsRecordErrorLog(effectiveErr) {
 		// 保存错误日志到mysql中
 		userId := c.GetInt("id")
 		tokenName := c.GetString("token_name")
