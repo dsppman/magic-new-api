@@ -187,45 +187,58 @@ func TestWriteGhostVertexErrorMasksUpstreamProviderDetails(t *testing.T) {
 
 	var body struct {
 		Error struct {
-			Code    int    `json:"code"`
 			Message string `json:"message"`
-			Status  string `json:"status"`
-			Details []struct {
-				Type   string `json:"@type"`
-				Reason string `json:"reason"`
-				Domain string `json:"domain"`
-			} `json:"details"`
+			Type    string `json:"type"`
+			Code    int    `json:"code"`
 		} `json:"error"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
 	assert.Equal(t, http.StatusUnauthorized, body.Error.Code)
-	assert.Equal(t, "UNAUTHENTICATED", body.Error.Status)
+	assert.Equal(t, string(types.ErrorTypeUpstreamError), body.Error.Type)
 	assert.Equal(t, "Request had invalid authentication credentials.", body.Error.Message)
-	require.Len(t, body.Error.Details, 1)
-	assert.Equal(t, "type.googleapis.com/google.rpc.ErrorInfo", body.Error.Details[0].Type)
-	assert.Equal(t, "aiplatform.googleapis.com", body.Error.Details[0].Domain)
 
 	responseText := recorder.Body.String()
 	assert.NotContains(t, responseText, "Gemini")
 	assert.NotContains(t, responseText, "invalid_request_error")
 	assert.NotContains(t, responseText, "invalid_api_key")
 	assert.NotContains(t, responseText, "x-goog-api-key")
+	assert.NotContains(t, responseText, "aiplatform.googleapis.com")
 }
 
-func TestBuildGhostVertexErrorMapsUnknownCustomErrorToInternal(t *testing.T) {
+func TestMaskGhostVertexAPIErrorMapsUnknownCustomErrorToWrappedInternal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set(GhostUpstreamChannelMetaKey, true)
+
 	apiErr := types.NewOpenAIError(
 		fmt.Errorf("custom upstream exploded: Claude style_error"),
 		types.ErrorCodeBadResponseStatusCode,
 		http.StatusInternalServerError,
 	)
 
-	statusCode, body := BuildGhostVertexError(apiErr)
-
+	statusCode, vertexError := BuildGhostVertexError(apiErr)
 	assert.Equal(t, http.StatusInternalServerError, statusCode)
-	assert.Equal(t, http.StatusInternalServerError, body.Error.Code)
-	assert.Equal(t, "INTERNAL", body.Error.Status)
-	assert.Equal(t, "Internal error encountered.", body.Error.Message)
-	assert.NotContains(t, body.Error.Message, "Claude")
+	assert.Equal(t, http.StatusInternalServerError, vertexError.Error.Code)
+	assert.Equal(t, "INTERNAL", vertexError.Error.Status)
+	assert.Equal(t, "Internal error encountered.", vertexError.Error.Message)
+	require.Len(t, vertexError.Error.Details, 1)
+	assert.Equal(t, "type.googleapis.com/google.rpc.ErrorInfo", vertexError.Error.Details[0].Type)
+	assert.Equal(t, "INTERNAL_ERROR", vertexError.Error.Details[0].Reason)
+	assert.Equal(t, "aiplatform.googleapis.com", vertexError.Error.Details[0].Domain)
+	vertexBody, err := common.Marshal(vertexError)
+	require.NoError(t, err)
+	assert.NotContains(t, string(vertexBody), "Claude")
+
+	masked := MaskGhostVertexAPIError(c, apiErr)
+	openAIError := masked.ToOpenAIError()
+
+	assert.Equal(t, http.StatusInternalServerError, masked.StatusCode)
+	assert.Equal(t, string(types.ErrorTypeOpenAIError), string(masked.GetErrorType()))
+	assert.Equal(t, types.ErrorCode("500"), masked.GetErrorCode())
+	assert.EqualValues(t, http.StatusInternalServerError, openAIError.Code)
+	assert.Equal(t, string(types.ErrorTypeUpstreamError), openAIError.Type)
+	assert.Equal(t, "Internal error encountered.", openAIError.Message)
+	assert.NotContains(t, openAIError.Message, "Claude")
 }
 
 func TestWriteGhostVertexErrorMasksSelectedGhostBeforeUpstreamMeta(t *testing.T) {
@@ -245,7 +258,9 @@ func TestWriteGhostVertexErrorMasksSelectedGhostBeforeUpstreamMeta(t *testing.T)
 	assert.NotContains(t, recorder.Body.String(), "ghost upstream")
 	assert.NotContains(t, recorder.Body.String(), "#9")
 	assert.NotContains(t, recorder.Body.String(), "no rows")
-	assert.Contains(t, recorder.Body.String(), "aiplatform.googleapis.com")
+	assert.Contains(t, recorder.Body.String(), "upstream_error")
+	assert.Contains(t, recorder.Body.String(), "Internal error encountered.")
+	assert.NotContains(t, recorder.Body.String(), "aiplatform.googleapis.com")
 }
 
 func TestMaskGhostVertexAPIErrorMasksLogsAndLastError(t *testing.T) {
@@ -263,8 +278,11 @@ func TestMaskGhostVertexAPIErrorMasksLogsAndLastError(t *testing.T) {
 
 	require.NotNil(t, masked)
 	assert.Equal(t, http.StatusUnauthorized, masked.StatusCode)
-	assert.Equal(t, types.ErrorCode("UNAUTHENTICATED"), masked.GetErrorCode())
+	assert.Equal(t, types.ErrorCode("401"), masked.GetErrorCode())
+	assert.Equal(t, types.ErrorTypeOpenAIError, masked.GetErrorType())
 	assert.Equal(t, "Request had invalid authentication credentials.", masked.Error())
+	assert.Equal(t, string(types.ErrorTypeUpstreamError), masked.ToOpenAIError().Type)
+	assert.EqualValues(t, http.StatusUnauthorized, masked.ToOpenAIError().Code)
 	assert.NotContains(t, masked.MaskSensitiveErrorWithStatusCode(), "Gemini")
 	assert.NotContains(t, masked.MaskSensitiveErrorWithStatusCode(), "invalid_api_key")
 	assert.NotContains(t, masked.MaskSensitiveErrorWithStatusCode(), "x-goog-api-key")

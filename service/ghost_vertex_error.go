@@ -1,10 +1,14 @@
 package service
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -16,6 +20,13 @@ const (
 	GhostUpstreamChannelStatusCodeMappingKey = "__ghost_upstream_channel_status_code_mapping"
 	GhostUpstreamChannelOtherKey             = "__ghost_upstream_channel_other"
 )
+
+type vertexAIErrorTemplate struct {
+	code    int
+	status  string
+	message string
+	reason  string
+}
 
 type vertexAIErrorResponse struct {
 	Error vertexAIError `json:"error"`
@@ -35,13 +46,6 @@ type vertexAIErrorDetail struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-type vertexAIErrorTemplate struct {
-	code    int
-	status  string
-	message string
-	reason  string
-}
-
 func IsGhostChannelRelay(c *gin.Context) bool {
 	if c == nil {
 		return false
@@ -57,8 +61,10 @@ func WriteGhostVertexError(c *gin.Context, apiErr *types.NewAPIError) bool {
 	if !IsGhostChannelRelay(c) || apiErr == nil {
 		return false
 	}
-	statusCode, body := BuildGhostVertexError(apiErr)
-	c.JSON(statusCode, body)
+	maskedErr := MaskGhostVertexAPIError(c, apiErr)
+	c.JSON(maskedErr.StatusCode, gin.H{
+		"error": maskedErr.ToOpenAIError(),
+	})
 	return true
 }
 
@@ -67,7 +73,6 @@ func MaskGhostVertexAPIError(c *gin.Context, apiErr *types.NewAPIError) *types.N
 		return apiErr
 	}
 
-	tmpl := ghostVertexErrorTemplateFor(apiErr)
 	options := make([]types.NewAPIErrorOptions, 0, 2)
 	if types.IsSkipRetryError(apiErr) {
 		options = append(options, types.ErrOptionWithSkipRetry())
@@ -75,12 +80,19 @@ func MaskGhostVertexAPIError(c *gin.Context, apiErr *types.NewAPIError) *types.N
 	if !types.IsRecordErrorLog(apiErr) {
 		options = append(options, types.ErrOptionWithNoRecordErrorLog())
 	}
-	return types.NewOpenAIError(
-		errors.New(tmpl.message),
-		types.ErrorCode(tmpl.status),
-		tmpl.code,
-		options...,
-	)
+
+	statusCode, vertexErr := BuildGhostVertexError(apiErr)
+	body, err := common.Marshal(vertexErr)
+	if err != nil {
+		tmpl := ghostVertexErrorTemplateFor(apiErr)
+		return buildGhostFallbackOpenAIError(tmpl, options...)
+	}
+
+	maskedErr := RelayErrorHandler(ghostRequestContext(c), &http.Response{
+		StatusCode: statusCode,
+		Body:       io.NopCloser(bytes.NewReader(body)),
+	}, false)
+	return applyGhostErrorOptions(maskedErr, options...)
 }
 
 func MaskGhostErrorMessage(c *gin.Context, message string, statusCode int) string {
@@ -121,6 +133,31 @@ func BuildGhostVertexError(apiErr *types.NewAPIError) (int, vertexAIErrorRespons
 			Details: []vertexAIErrorDetail{detail},
 		},
 	}
+}
+
+func buildGhostFallbackOpenAIError(tmpl vertexAIErrorTemplate, options ...types.NewAPIErrorOptions) *types.NewAPIError {
+	return types.WithOpenAIError(
+		types.OpenAIError{
+			Message: tmpl.message,
+			Code:    tmpl.code,
+		},
+		tmpl.code,
+		options...,
+	)
+}
+
+func applyGhostErrorOptions(apiErr *types.NewAPIError, options ...types.NewAPIErrorOptions) *types.NewAPIError {
+	if apiErr == nil || len(options) == 0 {
+		return apiErr
+	}
+	return types.WithOpenAIError(apiErr.ToOpenAIError(), apiErr.StatusCode, options...)
+}
+
+func ghostRequestContext(c *gin.Context) context.Context {
+	if c != nil && c.Request != nil {
+		return c.Request.Context()
+	}
+	return context.Background()
 }
 
 func ghostVertexErrorTemplateFor(apiErr *types.NewAPIError) vertexAIErrorTemplate {

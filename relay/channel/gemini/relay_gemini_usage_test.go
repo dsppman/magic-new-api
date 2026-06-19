@@ -69,7 +69,7 @@ func TestGeminiChatHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.
 	require.Equal(t, 1120, usage.CompletionTokenDetails.ReasoningTokens)
 }
 
-func TestGeminiChatHandlerGhostPromptBlockedWritesVertexError(t *testing.T) {
+func TestGeminiChatHandlerGhostPromptBlockedWritesWrappedVertexError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -104,17 +104,18 @@ func TestGeminiChatHandlerGhostPromptBlockedWritesVertexError(t *testing.T) {
 
 	var response struct {
 		Error struct {
-			Code    int    `json:"code"`
 			Message string `json:"message"`
-			Status  string `json:"status"`
+			Type    string `json:"type"`
+			Code    int    `json:"code"`
 		} `json:"error"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, http.StatusBadRequest, response.Error.Code)
-	assert.Equal(t, "FAILED_PRECONDITION", response.Error.Status)
+	assert.Equal(t, string(types.ErrorTypeUpstreamError), response.Error.Type)
 	assert.Equal(t, "The prompt was blocked because it violates safety policies.", response.Error.Message)
 	assert.NotContains(t, recorder.Body.String(), "Gemini API")
 	assert.NotContains(t, recorder.Body.String(), "prompt_blocked")
+	assert.NotContains(t, recorder.Body.String(), "aiplatform.googleapis.com")
 }
 
 func TestGeminiStreamHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.T) {
