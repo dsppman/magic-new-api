@@ -68,8 +68,9 @@ func TestGenerateCanRandomizeUsedQuotaAndAutoDisabled(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, channels, DefaultCount)
 
-	assert.Equal(t, 1020, stats.Enabled)
-	assert.Equal(t, 2080, stats.AutoDisabled)
+	assert.Equal(t, DefaultCount, stats.Enabled+stats.AutoDisabled)
+	assert.Greater(t, stats.Enabled, 0)
+	assert.Greater(t, stats.AutoDisabled, 0)
 
 	disabled := 0
 	quotas := make([]int64, 0, len(channels))

@@ -269,18 +269,14 @@ func buildStatuses(count int, rng *rand.Rand, random bool) []int {
 		return statuses
 	}
 
-	enabled := int(math.Round(float64(count) * 1020 / 3100))
 	statuses := make([]int, count)
 	for i := 0; i < count; i++ {
-		if i < enabled {
+		if rng.Intn(2) == 0 {
 			statuses[i] = common.ChannelStatusEnabled
 		} else {
 			statuses[i] = common.ChannelStatusAutoDisabled
 		}
 	}
-	rng.Shuffle(len(statuses), func(i, j int) {
-		statuses[i], statuses[j] = statuses[j], statuses[i]
-	})
 	return statuses
 }
 

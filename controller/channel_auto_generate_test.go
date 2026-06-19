@@ -328,7 +328,7 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 	}).Error)
 
 	reqBody, err := common.Marshal(map[string]any{
-		"count":                3,
+		"count":                20,
 		"seed":                 int64(123),
 		"models":               "gemini-2.5-flash,gemini-2.5-pro",
 		"groups":               []string{"vip", "default"},
@@ -358,17 +358,18 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
 	require.True(t, body.Success)
-	assert.Equal(t, 3, body.Data.Count)
-	assert.Equal(t, 1, body.Data.Enabled)
-	assert.Equal(t, 2, body.Data.AutoDisabled)
+	assert.Equal(t, 20, body.Data.Count)
+	assert.Equal(t, body.Data.Count, body.Data.Enabled+body.Data.AutoDisabled)
+	assert.Greater(t, body.Data.Enabled, 0)
+	assert.Greater(t, body.Data.AutoDisabled, 0)
 
 	var total int64
 	require.NoError(t, db.Model(&model.Channel{}).Count(&total).Error)
-	assert.Equal(t, int64(5), total)
+	assert.Equal(t, int64(22), total)
 
 	var generated []model.Channel
 	require.NoError(t, model.ApplyGhostChannelFilter(db.Model(&model.Channel{})).Find(&generated).Error)
-	require.Len(t, generated, 4)
+	require.Len(t, generated, 21)
 	newGenerated := 0
 	newAutoDisabled := 0
 	responseTimeCount := 0
@@ -392,8 +393,8 @@ func TestGenerateGhostChannelsWritesRealChannelTable(t *testing.T) {
 			responseTimeCount++
 		}
 	}
-	assert.Equal(t, 3, newGenerated)
-	assert.Equal(t, 2, newAutoDisabled)
+	assert.Equal(t, 20, newGenerated)
+	assert.Equal(t, body.Data.AutoDisabled, newAutoDisabled)
 	assert.Greater(t, responseTimeCount, 0)
 }
 
