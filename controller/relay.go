@@ -197,6 +197,26 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 
+		concurrencyLimit := channelConcurrencyLimit(c)
+		releaseSlot, slotAcquired := service.AcquireChannelConcurrencySlot(channel.Id, concurrencyLimit)
+		if !slotAcquired {
+			newAPIError = types.NewErrorWithStatusCode(
+				fmt.Errorf("渠道 #%d 已达到并发上限 %d", channel.Id, concurrencyLimit),
+				types.ErrorCodeChannelConcurrencyLimit, http.StatusTooManyRequests)
+			relayInfo.LastError = newAPIError
+			// A user-pinned channel has no alternative to route to, so fail fast.
+			if _, pinned := c.Get("specific_channel_id"); pinned {
+				break
+			}
+			// On the first attempt getChannel reuses the middleware-selected channel
+			// until a handler runs and populates ChannelMeta. Set it here so the next
+			// iteration re-selects and routes around the saturated channel.
+			if relayInfo.ChannelMeta == nil {
+				relayInfo.ChannelMeta = &relaycommon.ChannelMeta{ChannelId: channel.Id}
+			}
+			continue
+		}
+
 		addUsedChannel(c, channel.Id)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
@@ -210,16 +230,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
-		}
+		// Release the concurrency slot once this attempt finishes (success, error
+		// or panic); the next attempt re-acquires against its own channel.
+		func() {
+			defer releaseSlot()
+			switch relayFormat {
+			case types.RelayFormatOpenAIRealtime:
+				newAPIError = relay.WssHelper(c, relayInfo)
+			case types.RelayFormatClaude:
+				newAPIError = relay.ClaudeHelper(c, relayInfo)
+			case types.RelayFormatGemini:
+				newAPIError = geminiRelayHandler(c, relayInfo)
+			default:
+				newAPIError = relayHandler(c, relayInfo)
+			}
+		}()
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
@@ -288,6 +313,17 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 		// Best-effort: leave CombineText empty to avoid large allocations.
 	}
 	return meta
+}
+
+// channelConcurrencyLimit returns the configured max concurrent requests for the
+// currently selected channel (0 means unlimited). The channel setting is placed
+// in context by SetupContextForSelectedChannel for both the initial and retry
+// selections, so it is available on every attempt.
+func channelConcurrencyLimit(c *gin.Context) int {
+	if s, ok := common.GetContextKeyType[dto.ChannelSettings](c, constant.ContextKeyChannelSetting); ok {
+		return s.MaxConcurrentRequests
+	}
+	return 0
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {

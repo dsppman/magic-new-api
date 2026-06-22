@@ -3691,6 +3691,9 @@
     "渠道已生成": "Canaux générés",
     "已随机自动禁用 ${count} 个影子渠道": "${count} canaux fantômes désactivés automatiquement",
     "最近自动禁用：请求 ${requested} 个，可用 ${available} 个，已禁用 ${disabled} 个": "Dernière désactivation auto : ${requested} demandés, ${available} disponibles, ${disabled} désactivés",
-    "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "Dernière génération : ${count} au total, ${enabled} activés, ${autoDisabled} désactivés automatiquement"
+    "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "Dernière génération : ${count} au total, ${enabled} activés, ${autoDisabled} désactivés automatiquement",
+    "渠道最大并发": "Concurrence maximale",
+    "0 表示不限制": "0 signifie illimité",
+    "限制该渠道同时处理的请求数，0 表示不限制。达到上限时请求会自动尝试下一个可用渠道，全部占满时返回 429。": "Limite le nombre de requêtes traitées simultanément par ce canal ; 0 signifie illimité. À la limite, les requêtes essaient automatiquement le canal disponible suivant et ne renvoient 429 que lorsque tous les canaux sont saturés."
   }
 }

@@ -4225,6 +4225,9 @@
     "渠道已生成": "Đã tạo kênh",
     "已随机自动禁用 ${count} 个影子渠道": "Đã tự động tắt ngẫu nhiên ${count} kênh bóng",
     "最近自动禁用：请求 ${requested} 个，可用 ${available} 个，已禁用 ${disabled} 个": "Lần tự động tắt gần nhất: yêu cầu ${requested}, khả dụng ${available}, đã tắt ${disabled}",
-    "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "Lần tạo gần nhất: tổng ${count}, bật ${enabled}, tự động tắt ${autoDisabled}"
+    "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "Lần tạo gần nhất: tổng ${count}, bật ${enabled}, tự động tắt ${autoDisabled}",
+    "渠道最大并发": "Số yêu cầu đồng thời tối đa",
+    "0 表示不限制": "0 nghĩa là không giới hạn",
+    "限制该渠道同时处理的请求数，0 表示不限制。达到上限时请求会自动尝试下一个可用渠道，全部占满时返回 429。": "Giới hạn số yêu cầu mà kênh này xử lý cùng lúc; 0 nghĩa là không giới hạn. Khi đạt giới hạn, yêu cầu sẽ tự động thử kênh khả dụng tiếp theo và chỉ trả về 429 khi tất cả đều đầy."
   }
 }

@@ -3837,6 +3837,9 @@
     "渠道已生成": "Channels generated",
     "已随机自动禁用 ${count} 个影子渠道": "Randomly auto-disabled ${count} ghost channels",
     "最近自动禁用：请求 ${requested} 个，可用 ${available} 个，已禁用 ${disabled} 个": "Last auto-disable: requested ${requested}, available ${available}, disabled ${disabled}",
-    "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "Last generated: ${count} total, ${enabled} enabled, ${autoDisabled} auto-disabled"
+    "最近生成：共 ${count} 条，启用 ${enabled} 条，自动禁用 ${autoDisabled} 条": "Last generated: ${count} total, ${enabled} enabled, ${autoDisabled} auto-disabled",
+    "渠道最大并发": "Max Concurrency",
+    "0 表示不限制": "0 means unlimited",
+    "限制该渠道同时处理的请求数，0 表示不限制。达到上限时请求会自动尝试下一个可用渠道，全部占满时返回 429。": "Limit how many requests this channel handles at once; 0 means unlimited. When the limit is reached, requests automatically try the next available channel, returning 429 only when all channels are saturated."
   }
 }

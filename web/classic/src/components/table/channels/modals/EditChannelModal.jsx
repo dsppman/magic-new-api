@@ -194,6 +194,8 @@ const EditChannelModal = (props) => {
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
+    // 渠道最大并发请求数，0 表示不限制
+    max_concurrent_requests: 0,
     settings: '',
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
@@ -868,6 +870,8 @@ const EditChannelModal = (props) => {
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
+          data.max_concurrent_requests =
+            parsedSettings.max_concurrent_requests || 0;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -876,6 +880,7 @@ const EditChannelModal = (props) => {
           data.pass_through_body_enabled = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
+          data.max_concurrent_requests = 0;
         }
       } else {
         data.force_format = false;
@@ -884,6 +889,7 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
+        data.max_concurrent_requests = 0;
       }
 
       if (data.settings) {
@@ -993,6 +999,7 @@ const EditChannelModal = (props) => {
         pass_through_body_enabled: data.pass_through_body_enabled,
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
+        max_concurrent_requests: data.max_concurrent_requests || 0,
       });
       initialModelsRef.current = (data.models || [])
         .map((model) => (model || '').trim())
@@ -1035,7 +1042,8 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled ||
         data.force_format ||
         data.claude_beta_query ||
-        data.system_prompt_override;
+        data.system_prompt_override ||
+        data.max_concurrent_requests > 0;
       if (hasAdvancedValues) {
         setAdvancedSettingsOpen(true);
       }
@@ -1747,6 +1755,8 @@ const EditChannelModal = (props) => {
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
+      max_concurrent_requests:
+        Math.max(0, parseInt(localInputs.max_concurrent_requests, 10) || 0),
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1828,6 +1838,7 @@ const EditChannelModal = (props) => {
     delete localInputs.pass_through_body_enabled;
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
+    delete localInputs.max_concurrent_requests;
     delete localInputs.is_enterprise_account;
     // 顶层的 vertex_key_type 不应发送给后端
     delete localInputs.vertex_key_type;
@@ -2473,6 +2484,24 @@ const EditChannelModal = (props) => {
                         placeholder={t('渠道权重')}
                         min={0}
                         onNumberChange={(value) => handleInputChange('weight', value)}
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                  </Row>
+
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.InputNumber
+                        field='max_concurrent_requests'
+                        label={t('渠道最大并发')}
+                        placeholder={t('0 表示不限制')}
+                        min={0}
+                        onNumberChange={(value) =>
+                          handleInputChange('max_concurrent_requests', value)
+                        }
+                        extraText={t(
+                          '限制该渠道同时处理的请求数，0 表示不限制。达到上限时请求会自动尝试下一个可用渠道，全部占满时返回 429。',
+                        )}
                         style={{ width: '100%' }}
                       />
                     </Col>
