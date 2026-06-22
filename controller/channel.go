@@ -99,16 +99,16 @@ func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm
 
 func buildChannelListQueryForRequest(c *gin.Context, group string, statusFilter int, typeFilter int) *gorm.DB {
 	query := buildChannelListQuery(group, statusFilter, typeFilter)
-	if shouldFilterGhostChannels(c) {
-		query = model.ApplyGhostChannelFilter(query)
+	if shouldRestrictChannelsForAdmin(c) {
+		query = model.ApplyAdminVisibleChannelFilter(query)
 	}
 	return query
 }
 
 func buildChannelSearchQueryForRequest(c *gin.Context) *gorm.DB {
 	query := model.DB.Model(&model.Channel{})
-	if shouldFilterGhostChannels(c) {
-		query = model.ApplyGhostChannelFilter(query)
+	if shouldRestrictChannelsForAdmin(c) {
+		query = model.ApplyAdminVisibleChannelFilter(query)
 	}
 	return query
 }
@@ -130,7 +130,10 @@ func isAdminRequest(c *gin.Context) bool {
 	}
 }
 
-func shouldFilterGhostChannels(c *gin.Context) bool {
+// shouldRestrictChannelsForAdmin reports whether the request should be limited
+// to the admin-visible channel window (priority >= threshold). This applies to
+// admin (non-root) roles; root sees everything and common users are unaffected.
+func shouldRestrictChannelsForAdmin(c *gin.Context) bool {
 	return isAdminRequest(c)
 }
 
@@ -434,8 +437,8 @@ func GetChannel(c *gin.Context) {
 	}
 	var channel model.Channel
 	query := model.DB.Omit("key")
-	if shouldFilterGhostChannels(c) {
-		query = model.ApplyGhostChannelFilter(query)
+	if shouldRestrictChannelsForAdmin(c) {
+		query = model.ApplyAdminVisibleChannelFilter(query)
 	}
 	if err = query.First(&channel, "id = ?", id).Error; err != nil {
 		common.ApiError(c, err)

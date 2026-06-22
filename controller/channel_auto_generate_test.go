@@ -126,7 +126,7 @@ func performGetAllChannelsForRole(t *testing.T, role int) channelListAPIResponse
 	return body
 }
 
-func TestShouldFilterGhostChannelsOnlyForAdminRole(t *testing.T) {
+func TestShouldRestrictChannelsForAdminOnlyForAdminRole(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
@@ -149,7 +149,7 @@ func TestShouldFilterGhostChannelsOnlyForAdminRole(t *testing.T) {
 				ctx.Set("role", tt.role)
 			}
 
-			assert.Equal(t, tt.want, shouldFilterGhostChannels(ctx))
+			assert.Equal(t, tt.want, shouldRestrictChannelsForAdmin(ctx))
 		})
 	}
 }
@@ -204,6 +204,91 @@ func TestGetChannelFiltersGhostForAdmin(t *testing.T) {
 	require.True(t, rootReal.Success)
 	assert.Equal(t, "real-upstream", rootReal.Data.Name)
 	assert.Equal(t, int64(333), rootReal.Data.CreatedTime)
+}
+
+func TestAdminSeesHighPriorityNonGhostChannels(t *testing.T) {
+	db := setupAutoChannelControllerTestDB(t)
+
+	normalWeight := uint(100)
+	normalPriority := int64(100)
+	// A high-priority channel that is NOT a ghost channel: priority is at/above
+	// the admin-visible threshold but weight is an ordinary value.
+	highPriority := int64(model.AdminVisibleChannelPriorityThreshold)
+	ghostWeight := uint(model.GhostChannelMarker)
+	ghostPriority := int64(model.GhostChannelMarker)
+	autoBan := 1
+
+	normal := model.Channel{
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "real-secret",
+		Status:      common.ChannelStatusEnabled,
+		Name:        "real-upstream",
+		Weight:      &normalWeight,
+		Priority:    &normalPriority,
+		AutoBan:     &autoBan,
+		Models:      "gpt-4o",
+		Group:       "real",
+		CreatedTime: 111,
+	}
+	require.NoError(t, db.Create(&normal).Error)
+
+	highPriorityChannel := model.Channel{
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "high-priority-secret",
+		Status:      common.ChannelStatusEnabled,
+		Name:        "high-priority-upstream",
+		Weight:      &normalWeight,
+		Priority:    &highPriority,
+		AutoBan:     &autoBan,
+		Models:      "gpt-4o",
+		Group:       "high",
+		CreatedTime: 222,
+	}
+	require.NoError(t, db.Create(&highPriorityChannel).Error)
+
+	ghost := model.Channel{
+		Type:        constant.ChannelTypeVertexAi,
+		Key:         "generated-secret",
+		Status:      common.ChannelStatusEnabled,
+		Name:        "generated.viewer@gmail.com",
+		Weight:      &ghostWeight,
+		Priority:    &ghostPriority,
+		AutoBan:     &autoBan,
+		Models:      "gemini-2.5-flash",
+		Group:       "Gemini",
+		CreatedTime: 333,
+	}
+	require.NoError(t, db.Create(&ghost).Error)
+
+	// Admin now sees both the ghost channel and the high-priority non-ghost
+	// channel, but never the ordinary-priority channel.
+	adminBody := performGetAllChannelsForRole(t, common.RoleAdminUser)
+	require.True(t, adminBody.Success)
+	assert.Equal(t, int64(2), adminBody.Data.Total)
+	adminNames := map[string]bool{}
+	for _, ch := range adminBody.Data.Items {
+		adminNames[ch.Name] = true
+		assert.Empty(t, ch.Key)
+		assert.Equal(t, int64(adminChannelCreatedTime), ch.CreatedTime)
+	}
+	assert.True(t, adminNames["high-priority-upstream"])
+	assert.True(t, adminNames["generated.viewer@gmail.com"])
+	assert.False(t, adminNames["real-upstream"])
+
+	// The single-channel endpoint exposes the high-priority non-ghost channel to
+	// admins while still hiding the ordinary-priority one.
+	adminHigh := performGetChannelForRole(t, common.RoleAdminUser, highPriorityChannel.Id)
+	require.True(t, adminHigh.Success)
+	assert.Equal(t, "high-priority-upstream", adminHigh.Data.Name)
+	assert.Empty(t, adminHigh.Data.Key)
+
+	adminNormal := performGetChannelForRole(t, common.RoleAdminUser, normal.Id)
+	assert.False(t, adminNormal.Success)
+
+	// Root keeps full visibility.
+	rootBody := performGetAllChannelsForRole(t, common.RoleRootUser)
+	require.True(t, rootBody.Success)
+	assert.Equal(t, int64(3), rootBody.Data.Total)
 }
 
 func TestEnabledListModelsFiltersGhostForAdmin(t *testing.T) {

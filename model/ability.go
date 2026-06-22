@@ -52,11 +52,13 @@ func GetEnabledModels() []string {
 	return models
 }
 
-func GetGhostEnabledModels() []string {
+// GetAdminVisibleEnabledModels returns the distinct enabled models of the
+// channels an admin (non-root) role is allowed to see (priority >= threshold).
+func GetAdminVisibleEnabledModels() []string {
 	var models []string
 	DB.Table("abilities").
 		Joins("inner join channels on channels.id = abilities.channel_id").
-		Where("abilities.enabled = ? AND channels.priority = ? AND channels.weight = ?", true, GhostChannelMarker, GhostChannelMarker).
+		Where("abilities.enabled = ? AND channels.priority >= ?", true, AdminVisibleChannelPriorityThreshold).
 		Distinct("abilities.model").
 		Pluck("abilities.model", &models)
 	return models

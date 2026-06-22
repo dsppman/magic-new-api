@@ -331,8 +331,8 @@ func DashboardListModels(c *gin.Context) {
 
 func EnabledListModels(c *gin.Context) {
 	models := model.GetEnabledModels()
-	if shouldFilterGhostChannels(c) {
-		models = model.GetGhostEnabledModels()
+	if shouldRestrictChannelsForAdmin(c) {
+		models = model.GetAdminVisibleEnabledModels()
 	}
 	c.JSON(200, gin.H{
 		"success": true,

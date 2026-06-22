@@ -62,6 +62,10 @@ type Channel struct {
 const (
 	GhostChannelMarker     = 10010
 	GhostChannelUpstreamId = 9
+	// AdminVisibleChannelPriorityThreshold is the lower bound (inclusive) of the
+	// channel priority that an admin (non-root) role is allowed to see. Ghost
+	// channels (priority == GhostChannelMarker) are a subset of this window.
+	AdminVisibleChannelPriorityThreshold = 10000
 )
 
 type ChannelInfo struct {
@@ -170,6 +174,13 @@ func ApplyGhostChannelFilter(query *gorm.DB) *gorm.DB {
 	return query.Where("priority = ? AND weight = ?", GhostChannelMarker, GhostChannelMarker)
 }
 
+// ApplyAdminVisibleChannelFilter restricts a query to the channels an admin
+// (non-root) role is allowed to see: any channel whose priority is at least
+// AdminVisibleChannelPriorityThreshold (not just ghost channels).
+func ApplyAdminVisibleChannelFilter(query *gorm.DB) *gorm.DB {
+	return query.Where("priority >= ?", AdminVisibleChannelPriorityThreshold)
+}
+
 func (channel *Channel) IsGhostChannel() bool {
 	return channel != nil &&
 		channel.Priority != nil &&
@@ -178,9 +189,11 @@ func (channel *Channel) IsGhostChannel() bool {
 		*channel.Weight == GhostChannelMarker
 }
 
-func GetGhostChannelGroups() ([]string, error) {
+// GetAdminVisibleChannelGroups returns the distinct groups of the channels an
+// admin (non-root) role is allowed to see (priority >= threshold).
+func GetAdminVisibleChannelGroups() ([]string, error) {
 	var groups []string
-	err := ApplyGhostChannelFilter(DB.Model(&Channel{})).
+	err := ApplyAdminVisibleChannelFilter(DB.Model(&Channel{})).
 		Where(commonGroupCol+" != ''").
 		Distinct(commonGroupCol).
 		Pluck(commonGroupCol, &groups).Error

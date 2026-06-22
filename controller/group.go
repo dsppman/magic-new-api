@@ -12,7 +12,7 @@ import (
 )
 
 func GetGroups(c *gin.Context) {
-	if shouldFilterGhostChannels(c) {
+	if shouldRestrictChannelsForAdmin(c) {
 		if model.DB == nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
@@ -21,7 +21,7 @@ func GetGroups(c *gin.Context) {
 			})
 			return
 		}
-		groupNames, err := model.GetGhostChannelGroups()
+		groupNames, err := model.GetAdminVisibleChannelGroups()
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
