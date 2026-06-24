@@ -125,6 +125,17 @@ func buildChannelListQueryForRequest(c *gin.Context, group string, statusFilter 
 	return query
 }
 
+// maskChannelForAdmin hides fields that an admin (non-root) role must not see on
+// channels they are otherwise allowed to view. It blanks the upstream API
+// address (base_url) so it is always returned empty for the admin role.
+func maskChannelForAdmin(channel *model.Channel) {
+	if channel == nil {
+		return
+	}
+	empty := ""
+	channel.BaseURL = &empty
+}
+
 func GetAllChannels(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	channelData := make([]*model.Channel, 0)
@@ -193,8 +204,12 @@ func GetAllChannels(c *gin.Context) {
 		}
 	}
 
+	restrictAdmin := shouldRestrictChannelsForAdmin(c)
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
+		if restrictAdmin {
+			maskChannelForAdmin(datum)
+		}
 	}
 
 	countQuery := buildChannelListQueryForRequest(c, groupFilter, statusFilter, -1)
@@ -409,8 +424,12 @@ func SearchChannels(c *gin.Context) {
 
 	pagedData := channelData[startIdx:endIdx]
 
+	restrictAdmin := shouldRestrictChannelsForAdmin(c)
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
+		if restrictAdmin {
+			maskChannelForAdmin(datum)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -442,6 +461,9 @@ func GetChannel(c *gin.Context) {
 	}
 	if channel != nil {
 		clearChannelInfo(channel)
+		if shouldRestrictChannelsForAdmin(c) {
+			maskChannelForAdmin(channel)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

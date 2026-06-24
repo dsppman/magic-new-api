@@ -19,9 +19,10 @@ type adminChannelListResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
 		Items []struct {
-			Id   int    `json:"id"`
-			Name string `json:"name"`
-			Key  string `json:"key"`
+			Id      int    `json:"id"`
+			Name    string `json:"name"`
+			Key     string `json:"key"`
+			BaseURL string `json:"base_url"`
 		} `json:"items"`
 		Total int64 `json:"total"`
 	} `json:"data"`
@@ -30,8 +31,9 @@ type adminChannelListResponse struct {
 type adminChannelDetailResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
-		Id   int    `json:"id"`
-		Name string `json:"name"`
+		Id      int    `json:"id"`
+		Name    string `json:"name"`
+		BaseURL string `json:"base_url"`
 	} `json:"data"`
 }
 
@@ -60,11 +62,13 @@ func createVisibilityChannel(t *testing.T, db *gorm.DB, name string, priority in
 	t.Helper()
 	weight := uint(1)
 	autoBan := 1
+	baseURL := "https://upstream.example/" + name
 	ch := model.Channel{
 		Type:     1,
 		Key:      "secret-" + name,
 		Status:   common.ChannelStatusEnabled,
 		Name:     name,
+		BaseURL:  &baseURL,
 		Weight:   &weight,
 		Priority: &priority,
 		AutoBan:  &autoBan,
@@ -120,27 +124,34 @@ func TestAdminChannelVisibilityWindow(t *testing.T) {
 	for _, item := range adminList.Data.Items {
 		names[item.Name] = true
 		assert.Empty(t, item.Key, "channel key must not leak in the list response")
+		assert.Empty(t, item.BaseURL, "channel API address (base_url) must be empty for the admin role")
 	}
 	assert.True(t, names["at-threshold"])
 	assert.True(t, names["above-threshold"])
 	assert.False(t, names["ordinary"])
 
-	// List: root sees all three.
+	// List: root sees all three, with the real API address intact.
 	rootList := getAllChannelsForRole(t, common.RoleRootUser)
 	require.True(t, rootList.Success)
 	assert.Equal(t, int64(3), rootList.Data.Total)
+	for _, item := range rootList.Data.Items {
+		assert.NotEmpty(t, item.BaseURL, "root must still see the channel API address")
+	}
 
-	// Detail: admin is allowed to read the at-threshold channel...
+	// Detail: admin is allowed to read the at-threshold channel, but its API
+	// address is blanked.
 	adminAllowed := getChannelDetailForRole(t, common.RoleAdminUser, atThreshold.Id)
 	require.True(t, adminAllowed.Success)
 	assert.Equal(t, "at-threshold", adminAllowed.Data.Name)
+	assert.Empty(t, adminAllowed.Data.BaseURL, "admin detail must not expose base_url")
 
 	// ...but is denied the ordinary (below-threshold) channel.
 	adminDenied := getChannelDetailForRole(t, common.RoleAdminUser, ordinary.Id)
 	assert.False(t, adminDenied.Success)
 
-	// Detail: root can read the ordinary channel.
+	// Detail: root can read the ordinary channel, including its API address.
 	rootDetail := getChannelDetailForRole(t, common.RoleRootUser, ordinary.Id)
 	require.True(t, rootDetail.Success)
 	assert.Equal(t, "ordinary", rootDetail.Data.Name)
+	assert.NotEmpty(t, rootDetail.Data.BaseURL, "root detail must include base_url")
 }
