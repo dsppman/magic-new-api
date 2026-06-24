@@ -228,8 +228,6 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		channelMeta.ChannelOtherSettings = channelOtherSettings
 	}
 
-	applyGhostChannelUpstream(c, channelMeta)
-
 	if streamSupportedChannels[channelMeta.ChannelType] {
 		channelMeta.SupportStreamOptions = true
 	}
@@ -240,81 +238,6 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	// 重置某些字段，例如模型名称等
 	if info.Request != nil {
 		info.Request.SetModelName(info.OriginModelName)
-	}
-}
-
-func applyGhostChannelUpstream(c *gin.Context, channelMeta *ChannelMeta) {
-	if channelMeta == nil {
-		return
-	}
-	value, ok := c.Get("__ghost_upstream_channel_meta")
-	if !ok {
-		return
-	}
-	ghostMeta, ok := value.(*ChannelMeta)
-	if !ok || ghostMeta == nil || ghostMeta.ChannelType == 0 {
-		return
-	}
-
-	channelId := channelMeta.ChannelId
-	upstreamModelName := channelMeta.UpstreamModelName
-	isModelMapped := channelMeta.IsModelMapped
-	*channelMeta = *ghostMeta
-	channelMeta.ChannelId = channelId
-	channelMeta.UpstreamModelName = upstreamModelName
-	channelMeta.IsModelMapped = isModelMapped
-
-	if modelMapping, ok := getGhostContextValue[string](c, "__ghost_upstream_channel_model_mapping"); ok {
-		c.Set("model_mapping", modelMapping)
-	}
-	if statusCodeMapping, ok := getGhostContextValue[string](c, "__ghost_upstream_channel_status_code_mapping"); ok {
-		c.Set("status_code_mapping", statusCodeMapping)
-	}
-	other, _ := getGhostContextValue[string](c, "__ghost_upstream_channel_other")
-	setupGhostUpstreamProviderContext(c, channelMeta.ChannelType, other)
-	channelMeta.ApiType, _ = common.ChannelType2APIType(channelMeta.ChannelType)
-	channelMeta.ApiVersion = c.GetString("api_version")
-	if channelMeta.ChannelType == constant.ChannelTypeAzure {
-		channelMeta.ApiVersion = GetAPIVersion(c)
-	}
-	if channelMeta.ChannelType == constant.ChannelTypeVertexAi {
-		channelMeta.ApiVersion = c.GetString("region")
-	}
-}
-
-func getGhostContextValue[T any](c *gin.Context, key string) (T, bool) {
-	value, exists := c.Get(key)
-	if !exists {
-		var zero T
-		return zero, false
-	}
-	typed, ok := value.(T)
-	return typed, ok
-}
-
-func setupGhostUpstreamProviderContext(c *gin.Context, channelType int, other string) {
-	c.Set("api_version", "")
-	c.Set("region", "")
-	c.Set("plugin", "")
-	c.Set("bot_id", "")
-
-	switch channelType {
-	case constant.ChannelTypeAzure:
-		c.Set("api_version", other)
-	case constant.ChannelTypeVertexAi:
-		c.Set("region", other)
-	case constant.ChannelTypeXunfei:
-		c.Set("api_version", other)
-	case constant.ChannelTypeGemini:
-		c.Set("api_version", other)
-	case constant.ChannelTypeAli:
-		c.Set("plugin", other)
-	case constant.ChannelCloudflare:
-		c.Set("api_version", other)
-	case constant.ChannelTypeMokaAI:
-		c.Set("api_version", other)
-	case constant.ChannelTypeCoze:
-		c.Set("bot_id", other)
 	}
 }
 

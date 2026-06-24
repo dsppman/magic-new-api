@@ -51,8 +51,6 @@ type OpenAIModelsResponse struct {
 	Success bool          `json:"success"`
 }
 
-const adminChannelCreatedTime = 1997
-
 func parseStatusFilter(statusParam string) int {
 	switch strings.ToLower(statusParam) {
 	case "enabled", "1":
@@ -68,12 +66,6 @@ func clearChannelInfo(channel *model.Channel) {
 	if channel.ChannelInfo.IsMultiKey {
 		channel.ChannelInfo.MultiKeyDisabledReason = nil
 		channel.ChannelInfo.MultiKeyDisabledTime = nil
-	}
-}
-
-func maskChannelForAdminRequest(c *gin.Context, channel *model.Channel) {
-	if isAdminRequest(c) {
-		channel.CreatedTime = adminChannelCreatedTime
 	}
 }
 
@@ -97,22 +89,8 @@ func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm
 	return query
 }
 
-func buildChannelListQueryForRequest(c *gin.Context, group string, statusFilter int, typeFilter int) *gorm.DB {
-	query := buildChannelListQuery(group, statusFilter, typeFilter)
-	if shouldRestrictChannelsForAdmin(c) {
-		query = model.ApplyAdminVisibleChannelFilter(query)
-	}
-	return query
-}
-
-func buildChannelSearchQueryForRequest(c *gin.Context) *gorm.DB {
-	query := model.DB.Model(&model.Channel{})
-	if shouldRestrictChannelsForAdmin(c) {
-		query = model.ApplyAdminVisibleChannelFilter(query)
-	}
-	return query
-}
-
+// isAdminRequest reports whether the request is made by an admin (non-root)
+// role. The role is set on the context by the auth middleware.
 func isAdminRequest(c *gin.Context) bool {
 	role, ok := c.Get("role")
 	if !ok {
@@ -135,6 +113,16 @@ func isAdminRequest(c *gin.Context) bool {
 // admin (non-root) roles; root sees everything and common users are unaffected.
 func shouldRestrictChannelsForAdmin(c *gin.Context) bool {
 	return isAdminRequest(c)
+}
+
+// buildChannelListQueryForRequest wraps buildChannelListQuery and, for admin
+// (non-root) requests, restricts results to the admin-visible priority window.
+func buildChannelListQueryForRequest(c *gin.Context, group string, statusFilter int, typeFilter int) *gorm.DB {
+	query := buildChannelListQuery(group, statusFilter, typeFilter)
+	if shouldRestrictChannelsForAdmin(c) {
+		query = model.ApplyAdminVisibleChannelFilter(query)
+	}
+	return query
 }
 
 func GetAllChannels(c *gin.Context) {
@@ -207,7 +195,6 @@ func GetAllChannels(c *gin.Context) {
 
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
-		maskChannelForAdminRequest(c, datum)
 	}
 
 	countQuery := buildChannelListQueryForRequest(c, groupFilter, statusFilter, -1)
@@ -317,7 +304,7 @@ func SearchChannels(c *gin.Context) {
 	enableTagMode, _ := strconv.ParseBool(c.Query("tag_mode"))
 	channelData := make([]*model.Channel, 0)
 	if enableTagMode {
-		tags, err := model.SearchTagsWithBaseQuery(buildChannelSearchQueryForRequest(c), keyword, group, modelKeyword, idSort)
+		tags, err := model.SearchTags(keyword, group, modelKeyword, idSort)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -328,7 +315,7 @@ func SearchChannels(c *gin.Context) {
 		for _, tag := range tags {
 			if tag != nil && *tag != "" {
 				var tagChannels []*model.Channel
-				err := sortOptions.Apply(buildChannelListQueryForRequest(c, group, -1, -1).Where("tag = ?", *tag)).
+				err := sortOptions.Apply(buildChannelListQuery(group, -1, -1).Where("tag = ?", *tag)).
 					Omit("key").
 					Find(&tagChannels).Error
 				if err != nil {
@@ -342,7 +329,7 @@ func SearchChannels(c *gin.Context) {
 			}
 		}
 	} else {
-		channels, err := model.SearchChannelsWithBaseQuery(buildChannelSearchQueryForRequest(c), keyword, group, modelKeyword, idSort, sortOptions)
+		channels, err := model.SearchChannels(keyword, group, modelKeyword, idSort, sortOptions)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -351,6 +338,16 @@ func SearchChannels(c *gin.Context) {
 			return
 		}
 		channelData = channels
+	}
+
+	if shouldRestrictChannelsForAdmin(c) {
+		visible := make([]*model.Channel, 0, len(channelData))
+		for _, ch := range channelData {
+			if ch.IsAdminVisibleChannel() {
+				visible = append(visible, ch)
+			}
+		}
+		channelData = visible
 	}
 
 	if statusFilter == common.ChannelStatusEnabled || statusFilter == 0 {
@@ -414,7 +411,6 @@ func SearchChannels(c *gin.Context) {
 
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
-		maskChannelForAdminRequest(c, datum)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -435,21 +431,22 @@ func GetChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	var channel model.Channel
-	query := model.DB.Omit("key")
-	if shouldRestrictChannelsForAdmin(c) {
-		query = model.ApplyAdminVisibleChannelFilter(query)
-	}
-	if err = query.First(&channel, "id = ?", id).Error; err != nil {
+	channel, err := model.GetChannelById(id, false)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	clearChannelInfo(&channel)
-	maskChannelForAdminRequest(c, &channel)
+	if shouldRestrictChannelsForAdmin(c) && !channel.IsAdminVisibleChannel() {
+		common.ApiErrorMsg(c, "渠道不存在")
+		return
+	}
+	if channel != nil {
+		clearChannelInfo(channel)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    &channel,
+		"data":    channel,
 	})
 	return
 }

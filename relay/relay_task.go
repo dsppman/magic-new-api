@@ -146,9 +146,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 1. 确定 platform → 创建适配器 → 验证请求
 	platform := constant.TaskPlatform(c.GetString("platform"))
-	if platform == "" && info.ChannelType > 0 {
-		platform = constant.TaskPlatform(strconv.Itoa(info.ChannelType))
-	} else if platform == "" {
+	if platform == "" {
 		platform = GetTaskPlatform(c)
 	}
 	adaptor := GetTaskAdaptor(platform)

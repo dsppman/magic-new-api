@@ -7,11 +7,6 @@ type ChannelSettings struct {
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
 	SystemPrompt           string `json:"system_prompt,omitempty"`
 	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
-	// MaxConcurrentRequests caps the number of in-flight relay requests routed to
-	// this channel at once. 0 (the default) means no concurrency limit. When a
-	// channel is at its limit the relay routes the request to the next eligible
-	// channel, returning 429 only if every candidate is saturated.
-	MaxConcurrentRequests int `json:"max_concurrent_requests,omitempty"`
 }
 
 type VertexKeyType string

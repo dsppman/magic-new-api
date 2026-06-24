@@ -59,15 +59,6 @@ type Channel struct {
 	Keys []string `json:"-" gorm:"-"`
 }
 
-const (
-	GhostChannelMarker     = 10010
-	GhostChannelUpstreamId = 9
-	// AdminVisibleChannelPriorityThreshold is the lower bound (inclusive) of the
-	// channel priority that an admin (non-root) role is allowed to see. Ghost
-	// channels (priority == GhostChannelMarker) are a subset of this window.
-	AdminVisibleChannelPriorityThreshold = 10000
-)
-
 type ChannelInfo struct {
 	IsMultiKey             bool                  `json:"is_multi_key"`                        // 是否多Key模式
 	MultiKeySize           int                   `json:"multi_key_size"`                      // 多Key模式下的Key数量
@@ -170,23 +161,24 @@ func ApplyChannelGroupFilter(query *gorm.DB, group string) *gorm.DB {
 	return query.Where(channelGroupFilterCondition(), channelGroupFilterPattern(group))
 }
 
-func ApplyGhostChannelFilter(query *gorm.DB) *gorm.DB {
-	return query.Where("priority = ? AND weight = ?", GhostChannelMarker, GhostChannelMarker)
-}
+// AdminVisibleChannelPriorityThreshold is the lower bound (inclusive) of the
+// channel priority that an admin (non-root) role is allowed to see. Channels
+// below this priority are hidden from admins; root sees everything.
+const AdminVisibleChannelPriorityThreshold = 10000
 
 // ApplyAdminVisibleChannelFilter restricts a query to the channels an admin
 // (non-root) role is allowed to see: any channel whose priority is at least
-// AdminVisibleChannelPriorityThreshold (not just ghost channels).
+// AdminVisibleChannelPriorityThreshold.
 func ApplyAdminVisibleChannelFilter(query *gorm.DB) *gorm.DB {
 	return query.Where("priority >= ?", AdminVisibleChannelPriorityThreshold)
 }
 
-func (channel *Channel) IsGhostChannel() bool {
+// IsAdminVisibleChannel reports whether the channel falls within the
+// admin-visible priority window.
+func (channel *Channel) IsAdminVisibleChannel() bool {
 	return channel != nil &&
 		channel.Priority != nil &&
-		channel.Weight != nil &&
-		*channel.Priority == GhostChannelMarker &&
-		*channel.Weight == GhostChannelMarker
+		*channel.Priority >= AdminVisibleChannelPriorityThreshold
 }
 
 // GetAdminVisibleChannelGroups returns the distinct groups of the channels an
@@ -416,10 +408,6 @@ func GetChannelsByTag(tag string, idSort bool, selectAll bool, sortOptions ...Ch
 }
 
 func SearchChannels(keyword string, group string, model string, idSort bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {
-	return SearchChannelsWithBaseQuery(DB.Model(&Channel{}), keyword, group, model, idSort, sortOptions...)
-}
-
-func SearchChannelsWithBaseQuery(baseQuery *gorm.DB, keyword string, group string, model string, idSort bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {
 	var channels []*Channel
 	modelsCol := "`models`"
 
@@ -437,7 +425,7 @@ func SearchChannelsWithBaseQuery(baseQuery *gorm.DB, keyword string, group strin
 	order := resolveChannelSortOptions(idSort, sortOptions)
 
 	// 构造基础查询
-	baseQuery = baseQuery.Omit("key")
+	baseQuery := DB.Model(&Channel{}).Omit("key")
 
 	// 构造WHERE子句
 	whereClause := "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + " LIKE ?"
@@ -821,35 +809,6 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	return true
 }
 
-func UpdateChannelStatusWithTimestamp(channelId int, status int, reason string, statusTime int64) bool {
-	if statusTime == 0 {
-		statusTime = common.GetTimestamp()
-	}
-	channel, err := GetChannelById(channelId, true)
-	if err != nil {
-		return false
-	}
-	if channel.Status == status {
-		return false
-	}
-
-	info := channel.GetOtherInfo()
-	info["status_reason"] = reason
-	info["status_time"] = statusTime
-	channel.SetOtherInfo(info)
-	channel.Status = status
-	if err := channel.SaveWithoutKey(); err != nil {
-		common.SysLog(fmt.Sprintf("failed to update channel status with timestamp: channel_id=%d, status=%d, error=%v", channel.Id, status, err))
-		return false
-	}
-
-	CacheUpdateChannelStatus(channelId, status)
-	if err := UpdateAbilityStatus(channelId, status == common.ChannelStatusEnabled); err != nil {
-		common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channelId, err))
-	}
-	return true
-}
-
 func EnableChannelByTag(tag string) error {
 	err := DB.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error
 	if err != nil {
@@ -966,10 +925,6 @@ func GetPaginatedChannelTags(query *gorm.DB, offset int, limit int) ([]*string, 
 }
 
 func SearchTags(keyword string, group string, model string, idSort bool) ([]*string, error) {
-	return SearchTagsWithBaseQuery(DB.Model(&Channel{}), keyword, group, model, idSort)
-}
-
-func SearchTagsWithBaseQuery(baseQuery *gorm.DB, keyword string, group string, model string, idSort bool) ([]*string, error) {
 	var tags []*string
 	modelsCol := "`models`"
 
@@ -990,7 +945,7 @@ func SearchTagsWithBaseQuery(baseQuery *gorm.DB, keyword string, group string, m
 	}
 
 	// 构造基础查询
-	baseQuery = baseQuery.Omit("key")
+	baseQuery := DB.Model(&Channel{}).Omit("key")
 
 	// 构造WHERE子句
 	whereClause := "(id = ? OR name LIKE ? OR " + commonKeyCol + " = ? OR " + baseURLCol + " LIKE ?) AND " + modelsCol + " LIKE ?"

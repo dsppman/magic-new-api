@@ -90,8 +90,6 @@ func TestAdminCannotOperateChannels(t *testing.T) {
 		{name: "manage multi keys", method: http.MethodPost, path: "/api/channel/multi_key/manage"},
 		{name: "apply upstream updates", method: http.MethodPost, path: "/api/channel/upstream_updates/apply"},
 		{name: "detect upstream updates", method: http.MethodPost, path: "/api/channel/upstream_updates/detect"},
-		{name: "generate auto channels", method: http.MethodPost, path: "/api/option/channel_auto_generate"},
-		{name: "random auto-disable ghost channels", method: http.MethodPost, path: "/api/option/channel_random_auto_disable"},
 	}
 
 	for _, tt := range tests {
@@ -123,10 +121,6 @@ func TestAdminCannotReadNonChannelManagementRoutes(t *testing.T) {
 		name string
 		path string
 	}{
-		{name: "all logs", path: "/api/log/"},
-		{name: "all log stats", path: "/api/log/stat"},
-		{name: "all quota data", path: "/api/data/"},
-		{name: "user quota data ranking", path: "/api/data/users"},
 		{name: "prefill groups", path: "/api/prefill_group?type=model"},
 	}
 

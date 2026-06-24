@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -69,7 +70,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
-	apiKey := info.ApiKey
+	apiKey := common.GetContextKeyString(c, constant.ContextKeyChannelKey)
 	apiKey = strings.TrimPrefix(apiKey, "Bearer ")
 	appId, secretId, secretKey, err := parseTencentConfig(apiKey)
 	a.AppID = appId

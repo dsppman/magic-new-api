@@ -89,7 +89,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	defer func() {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
-			newAPIError = service.MaskGhostVertexAPIError(c, newAPIError)
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
@@ -197,26 +196,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 
-		concurrencyLimit := channelConcurrencyLimit(c)
-		releaseSlot, slotAcquired := service.AcquireChannelConcurrencySlot(channel.Id, concurrencyLimit)
-		if !slotAcquired {
-			newAPIError = types.NewErrorWithStatusCode(
-				fmt.Errorf("渠道 #%d 已达到并发上限 %d", channel.Id, concurrencyLimit),
-				types.ErrorCodeChannelConcurrencyLimit, http.StatusTooManyRequests)
-			relayInfo.LastError = newAPIError
-			// A user-pinned channel has no alternative to route to, so fail fast.
-			if _, pinned := c.Get("specific_channel_id"); pinned {
-				break
-			}
-			// On the first attempt getChannel reuses the middleware-selected channel
-			// until a handler runs and populates ChannelMeta. Set it here so the next
-			// iteration re-selects and routes around the saturated channel.
-			if relayInfo.ChannelMeta == nil {
-				relayInfo.ChannelMeta = &relaycommon.ChannelMeta{ChannelId: channel.Id}
-			}
-			continue
-		}
-
 		addUsedChannel(c, channel.Id)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
@@ -230,21 +209,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
-		// Release the concurrency slot once this attempt finishes (success, error
-		// or panic); the next attempt re-acquires against its own channel.
-		func() {
-			defer releaseSlot()
-			switch relayFormat {
-			case types.RelayFormatOpenAIRealtime:
-				newAPIError = relay.WssHelper(c, relayInfo)
-			case types.RelayFormatClaude:
-				newAPIError = relay.ClaudeHelper(c, relayInfo)
-			case types.RelayFormatGemini:
-				newAPIError = geminiRelayHandler(c, relayInfo)
-			default:
-				newAPIError = relayHandler(c, relayInfo)
-			}
-		}()
+		switch relayFormat {
+		case types.RelayFormatOpenAIRealtime:
+			newAPIError = relay.WssHelper(c, relayInfo)
+		case types.RelayFormatClaude:
+			newAPIError = relay.ClaudeHelper(c, relayInfo)
+		case types.RelayFormatGemini:
+			newAPIError = geminiRelayHandler(c, relayInfo)
+		default:
+			newAPIError = relayHandler(c, relayInfo)
+		}
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
@@ -252,7 +226,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
-		relayInfo.LastError = service.MaskGhostVertexAPIError(c, newAPIError)
+		relayInfo.LastError = newAPIError
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
@@ -313,17 +287,6 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 		// Best-effort: leave CombineText empty to avoid large allocations.
 	}
 	return meta
-}
-
-// channelConcurrencyLimit returns the configured max concurrent requests for the
-// currently selected channel (0 means unlimited). The channel setting is placed
-// in context by SetupContextForSelectedChannel for both the initial and retry
-// selections, so it is available on every attempt.
-func channelConcurrencyLimit(c *gin.Context) int {
-	if s, ok := common.GetContextKeyType[dto.ChannelSettings](c, constant.ContextKeyChannelSetting); ok {
-		return s.MaxConcurrentRequests
-	}
-	return 0
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
@@ -391,22 +354,16 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
-	visibleErr := service.MaskGhostVertexAPIError(c, err)
-	effectiveErr := err
-	if service.IsGhostChannelRelay(c) {
-		effectiveErr = visibleErr
-	}
-	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, effectiveErr.StatusCode, common.LocalLogPreview(effectiveErr.Error())))
+	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	shouldDisable := service.ShouldDisableChannel(effectiveErr)
-	if shouldDisable && channelError.AutoBan {
+	if service.ShouldDisableChannel(err) && channelError.AutoBan {
 		gopool.Go(func() {
-			service.DisableChannel(channelError, visibleErr.ErrorWithStatusCode())
+			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
 	}
 
-	if constant.ErrorLogEnabled && types.IsRecordErrorLog(effectiveErr) {
+	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {
 		// 保存错误日志到mysql中
 		userId := c.GetInt("id")
 		tokenName := c.GetString("token_name")
@@ -418,9 +375,9 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		if c.Request != nil && c.Request.URL != nil {
 			other["request_path"] = c.Request.URL.Path
 		}
-		other["error_type"] = visibleErr.GetErrorType()
-		other["error_code"] = visibleErr.GetErrorCode()
-		other["status_code"] = visibleErr.StatusCode
+		other["error_type"] = err.GetErrorType()
+		other["error_code"] = err.GetErrorCode()
+		other["status_code"] = err.StatusCode
 		other["channel_id"] = channelId
 		other["channel_name"] = c.GetString("channel_name")
 		other["channel_type"] = c.GetInt("channel_type")
@@ -438,7 +395,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
-		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, visibleErr.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 
 }

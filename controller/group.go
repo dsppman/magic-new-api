@@ -12,12 +12,14 @@ import (
 )
 
 func GetGroups(c *gin.Context) {
+	// Admin (non-root) roles only see the groups of channels within their
+	// visible priority window, not the full set of configured group ratios.
 	if shouldRestrictChannelsForAdmin(c) {
 		if model.DB == nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"message": "",
-				"data":    []string{},
+				"data":    make([]string, 0),
 			})
 			return
 		}
