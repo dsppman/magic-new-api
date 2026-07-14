@@ -27,6 +27,7 @@ import type {
   UserFormData,
   ManageUserAction,
   ManageUserQuotaPayload,
+  ManageUserGroupRatioPayload,
   ApiResponse,
 } from './types'
 
@@ -122,6 +123,16 @@ export async function manageUser(
  */
 export async function adjustUserQuota(
   payload: ManageUserQuotaPayload
+): Promise<ApiResponse<Partial<User>>> {
+  const res = await api.post('/api/user/manage', payload)
+  return res.data
+}
+
+/**
+ * Set or clear a user's exclusive group ratio (admin only)
+ */
+export async function adjustUserGroupRatio(
+  payload: ManageUserGroupRatioPayload
 ): Promise<ApiResponse<Partial<User>>> {
   const res = await api.post('/api/user/manage', payload)
   return res.data

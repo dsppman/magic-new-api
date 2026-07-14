@@ -76,8 +76,6 @@ const EditUserModal = (props) => {
   const [showAdjustQuotaRaw, setShowAdjustQuotaRaw] = useState(false);
   const [showQuotaInput, setShowQuotaInput] = useState(false);
   const [inputs, setInputs] = useState(null);
-  const [groupRatioLocal, setGroupRatioLocal] = useState('');
-  const [groupRatioSaving, setGroupRatioSaving] = useState(false);
 
   const isEdit = Boolean(userId);
 
@@ -109,17 +107,6 @@ const EditUserModal = (props) => {
 
   const handleCancel = () => props.handleClose();
 
-  // 从用户 setting JSON 中提取专属倍率，未设置返回空字符串
-  const parseGroupRatio = (settingStr) => {
-    if (!settingStr) return '';
-    try {
-      const s = typeof settingStr === 'string' ? JSON.parse(settingStr) : settingStr;
-      return s && typeof s.group_ratio === 'number' ? s.group_ratio : '';
-    } catch (e) {
-      return '';
-    }
-  };
-
   const loadUser = async () => {
     setLoading(true);
     const url = userId ? `/api/user/${userId}` : `/api/user/self`;
@@ -131,7 +118,6 @@ const EditUserModal = (props) => {
         quotaToDisplayAmount(data.quota || 0).toFixed(6),
       );
       setInputs({ ...getInitValues(), ...data });
-      setGroupRatioLocal(parseGroupRatio(data.setting));
     } else {
       showError(message);
     }
@@ -216,32 +202,6 @@ const EditUserModal = (props) => {
       showError(e.message);
     }
     setAdjustLoading(false);
-  };
-
-  /* ------------------- per-user group ratio ------------------- */
-  const saveGroupRatio = async () => {
-    setGroupRatioSaving(true);
-    try {
-      const val =
-        groupRatioLocal === '' || groupRatioLocal == null
-          ? null
-          : Number(groupRatioLocal);
-      const res = await API.post('/api/user/manage', {
-        id: parseInt(userId),
-        action: 'set_group_ratio',
-        group_ratio: val,
-      });
-      const { success, message } = res.data;
-      if (success) {
-        showSuccess(val === null ? t('已清除专属倍率') : t('专属倍率设置成功'));
-        props.refresh();
-      } else {
-        showError(message);
-      }
-    } catch (e) {
-      showError(e.message);
-    }
-    setGroupRatioSaving(false);
   };
 
   const getPreviewText = () => {
@@ -406,41 +366,6 @@ const EditUserModal = (props) => {
                           search
                           rules={[{ required: true, message: t('请选择分组') }]}
                         />
-                      </Col>
-
-                      <Col span={24}>
-                        <Form.Slot label={t('专属倍率')}>
-                          <div className='flex items-center gap-2'>
-                            <InputNumber
-                              placeholder={t('未设置时按分组倍率计费')}
-                              value={groupRatioLocal}
-                              min={0}
-                              step={0.1}
-                              onChange={(val) =>
-                                setGroupRatioLocal(
-                                  val === '' || val == null ? '' : val,
-                                )
-                              }
-                              style={{ flex: 1 }}
-                              showClear
-                            />
-                            <Button
-                              theme='solid'
-                              loading={groupRatioSaving}
-                              onClick={saveGroupRatio}
-                            >
-                              {t('保存')}
-                            </Button>
-                          </div>
-                          <div
-                            className='text-xs mt-1'
-                            style={{ color: 'var(--semi-color-text-2)' }}
-                          >
-                            {t(
-                              '为该用户设置专属分组倍率，优先级高于分组倍率；0 表示免费，留空表示不启用',
-                            )}
-                          </div>
-                        </Form.Slot>
                       </Col>
 
                       <Col span={10}>

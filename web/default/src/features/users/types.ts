@@ -59,6 +59,9 @@ export const userSchema = z.object({
   last_login_at: z.number().optional(),
   DeletedAt: z.any().nullable().optional(),
   remark: z.string().optional(),
+  // Raw user setting JSON string; carries the admin-only exclusive group ratio
+  // ({"group_ratio": ...}) among other per-user settings.
+  setting: z.string().optional(),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
     .optional(),
@@ -121,6 +124,7 @@ export type ManageUserAction =
   | 'disable'
   | 'delete'
   | 'add_quota'
+  | 'set_group_ratio'
 
 export type QuotaAdjustMode = 'add' | 'subtract' | 'override'
 
@@ -129,6 +133,17 @@ export interface ManageUserQuotaPayload {
   action: 'add_quota'
   mode: QuotaAdjustMode
   value: number
+}
+
+/**
+ * Set (or clear) a user's exclusive group ratio.
+ * group_ratio null clears the override (falls back to the group ratio);
+ * a number sets the per-user ratio (0 = free).
+ */
+export interface ManageUserGroupRatioPayload {
+  id: number
+  action: 'set_group_ratio'
+  group_ratio: number | null
 }
 
 // ============================================================================

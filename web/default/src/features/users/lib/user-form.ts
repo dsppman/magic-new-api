@@ -40,6 +40,9 @@ export const userFormSchema = z.object({
   role: z.number().optional(),
   quota_dollars: z.number().min(0).optional(),
   group: z.string().optional(),
+  // Display/tracking only; saved atomically via /api/user/manage, not sent in
+  // the update payload. null means "no exclusive ratio" (falls back to group ratio).
+  group_ratio: z.number().min(0).nullable().optional(),
   remark: z.string().optional(),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
@@ -59,9 +62,24 @@ export const USER_FORM_DEFAULT_VALUES: UserFormValues = {
   role: 1, // Default to common user
   quota_dollars: 0,
   group: DEFAULT_GROUP,
+  group_ratio: null,
   remark: '',
   // Filled against the backend catalog at render time; see UsersMutateDrawer.
   admin_permissions: {},
+}
+
+/**
+ * Extract the exclusive group ratio from a user's raw setting JSON string.
+ * Returns null when unset or unparseable.
+ */
+export function parseUserGroupRatio(settingStr?: string): number | null {
+  if (!settingStr) return null
+  try {
+    const parsed = JSON.parse(settingStr) as { group_ratio?: unknown }
+    return typeof parsed.group_ratio === 'number' ? parsed.group_ratio : null
+  } catch {
+    return null
+  }
 }
 
 // ============================================================================
@@ -120,6 +138,7 @@ export function transformUserToFormDefaults(user: User): UserFormValues {
     role: user.role,
     quota_dollars: quotaUnitsToDollars(user.quota),
     group: user.group || DEFAULT_GROUP,
+    group_ratio: parseUserGroupRatio(user.setting),
     remark: user.remark || '',
     admin_permissions: user.admin_permissions ?? {},
   }
