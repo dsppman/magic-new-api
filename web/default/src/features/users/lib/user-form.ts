@@ -41,8 +41,8 @@ export const userFormSchema = z.object({
   quota_dollars: z.number().min(0).optional(),
   group: z.string().optional(),
   // Display/tracking only; saved atomically via /api/user/manage, not sent in
-  // the update payload. null means "no exclusive ratio" (falls back to group ratio).
-  group_ratio: z.number().min(0).nullable().optional(),
+  // the update payload. Map of "using group -> ratio"; empty means no overrides.
+  group_ratio: z.record(z.string(), z.number()).optional(),
   remark: z.string().optional(),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
@@ -62,23 +62,31 @@ export const USER_FORM_DEFAULT_VALUES: UserFormValues = {
   role: 1, // Default to common user
   quota_dollars: 0,
   group: DEFAULT_GROUP,
-  group_ratio: null,
+  group_ratio: {},
   remark: '',
   // Filled against the backend catalog at render time; see UsersMutateDrawer.
   admin_permissions: {},
 }
 
 /**
- * Extract the exclusive group ratio from a user's raw setting JSON string.
- * Returns null when unset or unparseable.
+ * Extract the exclusive group ratio map ("using group -> ratio") from a user's
+ * raw setting JSON string. Returns an empty object when unset or unparseable.
  */
-export function parseUserGroupRatio(settingStr?: string): number | null {
-  if (!settingStr) return null
+export function parseUserGroupRatio(settingStr?: string): Record<string, number> {
+  if (!settingStr) return {}
   try {
     const parsed = JSON.parse(settingStr) as { group_ratio?: unknown }
-    return typeof parsed.group_ratio === 'number' ? parsed.group_ratio : null
+    const raw = parsed.group_ratio
+    if (!raw || typeof raw !== 'object') return {}
+    const result: Record<string, number> = {}
+    for (const [group, ratio] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof ratio === 'number' && Number.isFinite(ratio)) {
+        result[group] = ratio
+      }
+    }
+    return result
   } catch {
-    return null
+    return {}
   }
 }
 
@@ -140,6 +148,7 @@ export function transformUserToFormDefaults(user: User): UserFormValues {
     group: user.group || DEFAULT_GROUP,
     group_ratio: parseUserGroupRatio(user.setting),
     remark: user.remark || '',
+    // group_ratio parsed above is always a plain object (never null).
     admin_permissions: user.admin_permissions ?? {},
   }
 }

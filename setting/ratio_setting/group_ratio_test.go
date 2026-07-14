@@ -8,8 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func fp(v float64) *float64 { return &v }
-
 // seedRatios 显式初始化分组倍率与分组特殊倍率，供解析器测试使用。
 func seedRatios(t *testing.T) {
 	t.Helper()
@@ -18,13 +16,14 @@ func seedRatios(t *testing.T) {
 }
 
 // TestGetEffectiveGroupRatioInfo 锁定三级倍率优先级这一计费不变量：
-// 用户专属倍率 > 分组特殊倍率 > 普通分组倍率，且非法专属倍率必须被忽略以防算出负额度。
+// 用户专属倍率（按使用分组键控） > 分组特殊倍率 > 普通分组倍率，
+// 且只有命中当前使用分组的条目才生效，非法值必须被忽略以防算出负额度。
 func TestGetEffectiveGroupRatioInfo(t *testing.T) {
 	seedRatios(t)
 
 	cases := []struct {
 		name             string
-		userSpecial      *float64
+		userSpecial      map[string]float64
 		userGroup        string
 		usingGroup       string
 		wantRatio        float64
@@ -33,8 +32,8 @@ func TestGetEffectiveGroupRatioInfo(t *testing.T) {
 		wantHasGroupSpec bool
 	}{
 		{
-			name:            "user special ratio wins over group ratio",
-			userSpecial:     fp(0.5),
+			name:            "user special ratio for using group wins over group ratio",
+			userSpecial:     map[string]float64{"default": 0.5},
 			userGroup:       "default",
 			usingGroup:      "default",
 			wantRatio:       0.5,
@@ -43,7 +42,7 @@ func TestGetEffectiveGroupRatioInfo(t *testing.T) {
 		},
 		{
 			name:            "user special ratio zero means free and is allowed",
-			userSpecial:     fp(0),
+			userSpecial:     map[string]float64{"default": 0},
 			userGroup:       "default",
 			usingGroup:      "default",
 			wantRatio:       0,
@@ -52,7 +51,7 @@ func TestGetEffectiveGroupRatioInfo(t *testing.T) {
 		},
 		{
 			name:            "user special ratio wins even over group special ratio",
-			userSpecial:     fp(0.3),
+			userSpecial:     map[string]float64{"special": 0.3},
 			userGroup:       "vip",
 			usingGroup:      "special",
 			wantRatio:       0.3,
@@ -60,8 +59,17 @@ func TestGetEffectiveGroupRatioInfo(t *testing.T) {
 			wantUserSpecial: 0.3,
 		},
 		{
-			name:             "no user special falls back to group special ratio",
-			userSpecial:      nil,
+			name:            "user special for a different group does not apply to this using group",
+			userSpecial:     map[string]float64{"vip": 0.4},
+			userGroup:       "default",
+			usingGroup:      "default",
+			wantRatio:       1,
+			wantHasUser:     false,
+			wantUserSpecial: -1,
+		},
+		{
+			name:             "no matching user special falls back to group special ratio",
+			userSpecial:      map[string]float64{"default": 0.5},
 			userGroup:        "vip",
 			usingGroup:       "special",
 			wantRatio:        0.9,
@@ -70,7 +78,7 @@ func TestGetEffectiveGroupRatioInfo(t *testing.T) {
 			wantHasGroupSpec: true,
 		},
 		{
-			name:            "no user special no group special falls back to group ratio",
+			name:            "nil map falls back to group ratio",
 			userSpecial:     nil,
 			userGroup:       "default",
 			usingGroup:      "vip",
@@ -80,7 +88,7 @@ func TestGetEffectiveGroupRatioInfo(t *testing.T) {
 		},
 		{
 			name:            "negative user special is ignored and falls back",
-			userSpecial:     fp(-1),
+			userSpecial:     map[string]float64{"vip": -1},
 			userGroup:       "default",
 			usingGroup:      "vip",
 			wantRatio:       2,
@@ -89,7 +97,7 @@ func TestGetEffectiveGroupRatioInfo(t *testing.T) {
 		},
 		{
 			name:            "NaN user special is ignored and falls back",
-			userSpecial:     fp(math.NaN()),
+			userSpecial:     map[string]float64{"vip": math.NaN()},
 			userGroup:       "default",
 			usingGroup:      "vip",
 			wantRatio:       2,
@@ -98,7 +106,7 @@ func TestGetEffectiveGroupRatioInfo(t *testing.T) {
 		},
 		{
 			name:            "Inf user special is ignored and falls back",
-			userSpecial:     fp(math.Inf(1)),
+			userSpecial:     map[string]float64{"vip": math.Inf(1)},
 			userGroup:       "default",
 			usingGroup:      "vip",
 			wantRatio:       2,

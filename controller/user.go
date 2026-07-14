@@ -1038,8 +1038,8 @@ type ManageRequest struct {
 	Action string `json:"action"`
 	Value  int    `json:"value"`
 	Mode   string `json:"mode"`
-	// GroupRatio 用于 set_group_ratio 操作：非 nil 时设置用户专属倍率，nil 时清除（回退到分组倍率）。
-	GroupRatio *float64 `json:"group_ratio"`
+	// GroupRatio 用于 set_group_ratio 操作：完整的「使用分组 -> 倍率」映射，整体覆盖用户专属倍率；空/nil 表示清除全部。
+	GroupRatio map[string]float64 `json:"group_ratio"`
 }
 
 // ManageUser Only admin user can do this
@@ -1157,16 +1157,28 @@ func ManageUser(c *gin.Context) {
 		})
 		return
 	case "set_group_ratio":
+		// req.GroupRatio 是「使用分组 -> 倍率」的完整映射，整体覆盖用户专属倍率；空/nil 表示清除全部。
 		newSetting := user.GetSetting()
-		if req.GroupRatio == nil {
+		if len(req.GroupRatio) == 0 {
 			newSetting.GroupRatio = nil
 		} else {
-			if err := ratio_setting.CheckUserSpecialRatio(*req.GroupRatio); err != nil {
-				common.ApiError(c, err)
-				return
+			cleaned := make(map[string]float64, len(req.GroupRatio))
+			for group, ratio := range req.GroupRatio {
+				group = strings.TrimSpace(group)
+				if group == "" {
+					continue
+				}
+				if err := ratio_setting.CheckUserSpecialRatio(ratio); err != nil {
+					common.ApiError(c, err)
+					return
+				}
+				cleaned[group] = ratio
 			}
-			ratio := *req.GroupRatio
-			newSetting.GroupRatio = &ratio
+			if len(cleaned) == 0 {
+				newSetting.GroupRatio = nil
+			} else {
+				newSetting.GroupRatio = cleaned
+			}
 		}
 		if err := model.UpdateUserSetting(user.Id, newSetting); err != nil {
 			common.ApiError(c, err)
@@ -1176,14 +1188,10 @@ func ManageUser(c *gin.Context) {
 		if err := model.InvalidateUserCache(user.Id); err != nil {
 			common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", user.Id, err.Error()))
 		}
-		auditRatio := "cleared"
-		if newSetting.GroupRatio != nil {
-			auditRatio = fmt.Sprintf("%v", *newSetting.GroupRatio)
-		}
 		recordManageAuditFor(c, user.Id, "user.group_ratio_set", map[string]interface{}{
 			"username":    user.Username,
 			"id":          user.Id,
-			"group_ratio": auditRatio,
+			"group_ratio": fmt.Sprintf("%v", newSetting.GroupRatio),
 		})
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,

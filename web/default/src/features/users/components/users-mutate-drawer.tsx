@@ -90,7 +90,7 @@ import {
   transformUserToFormDefaults,
 } from '../lib'
 import { type User } from '../types'
-import { UserGroupRatioDialog } from './user-group-ratio-dialog'
+import { UserGroupRatioOverrides } from './user-group-ratio-overrides'
 import { UserQuotaDialog } from './user-quota-dialog'
 import { useUsers } from './users-provider'
 
@@ -111,7 +111,6 @@ export function UsersMutateDrawer({
   const currentUser = useAuthStore((s) => s.auth.user)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [quotaDialogOpen, setQuotaDialogOpen] = useState(false)
-  const [ratioDialogOpen, setRatioDialogOpen] = useState(false)
 
   // Fetch groups
   const { data: groupsData } = useQuery({
@@ -430,42 +429,11 @@ export function UsersMutateDrawer({
                     )}
                   />
 
-                  <FormField
-                    control={form.control}
-                    name='group_ratio'
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{t('Exclusive Group Ratio')}</FormLabel>
-                        <div className='flex gap-2'>
-                          <FormControl>
-                            <Input
-                              value={
-                                field.value === null ||
-                                field.value === undefined
-                                  ? t('Not set')
-                                  : String(field.value)
-                              }
-                              readOnly
-                              className='flex-1'
-                            />
-                          </FormControl>
-                          <Button
-                            type='button'
-                            variant='outline'
-                            onClick={() => setRatioDialogOpen(true)}
-                          >
-                            <Pencil className='mr-1 h-4 w-4' />
-                            {t('Set Ratio')}
-                          </Button>
-                        </div>
-                        <FormDescription>
-                          {t(
-                            'Per-user ratio that overrides the group ratio (0 = free, empty = disabled)'
-                          )}
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
+                  <UserGroupRatioOverrides
+                    userId={currentRow!.id}
+                    groups={groups}
+                    overrides={form.watch('group_ratio') ?? {}}
+                    onSaved={refreshUserData}
                   />
 
                   <FormField
@@ -631,17 +599,6 @@ export function UsersMutateDrawer({
           onOpenChange={setQuotaDialogOpen}
           userId={currentRow.id}
           currentQuota={parseQuotaFromDollars(currentQuotaRaw || 0)}
-          onSuccess={refreshUserData}
-        />
-      )}
-
-      {/* Exclusive Group Ratio Dialog */}
-      {currentRow && (
-        <UserGroupRatioDialog
-          open={ratioDialogOpen}
-          onOpenChange={setRatioDialogOpen}
-          userId={currentRow.id}
-          currentRatio={form.watch('group_ratio') ?? null}
           onSuccess={refreshUserData}
         />
       )}

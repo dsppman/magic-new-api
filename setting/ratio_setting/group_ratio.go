@@ -109,22 +109,24 @@ func CheckUserSpecialRatio(ratio float64) error {
 
 // GetEffectiveGroupRatioInfo 按三级优先级解析本次请求的分组倍率：
 // 用户专属倍率（最高） > 分组特殊倍率(GroupGroupRatio) > 普通分组倍率(GroupRatio)。
-// userSpecialRatio 为用户专属倍率（未设置时为 nil）；若存储值非法（负数/NaN/Inf）则忽略并回退，
-// 确保错误配置永远不会算出负额度（credit）。usingGroup 应为已完成 auto 分组解析后的最终分组。
-func GetEffectiveGroupRatioInfo(userSpecialRatio *float64, userGroup, usingGroup string) types.GroupRatioInfo {
+// userSpecialRatios 为该用户的「使用分组 -> 倍率」专属映射（未配置时为 nil）；只有命中
+// 当前 usingGroup 的条目才生效，与 GroupGroupRatio 语义一致，只是键控到具体用户。
+// 若命中值非法（负数/NaN/Inf）则忽略并回退，确保错误配置永远不会算出负额度（credit）。
+// usingGroup 应为已完成 auto 分组解析后的最终分组。
+func GetEffectiveGroupRatioInfo(userSpecialRatios map[string]float64, userGroup, usingGroup string) types.GroupRatioInfo {
 	info := types.GroupRatioInfo{
 		GroupRatio:        1.0,
 		GroupSpecialRatio: -1,
 		UserSpecialRatio:  -1,
 	}
-	if userSpecialRatio != nil {
-		if ValidRatioValue(*userSpecialRatio) {
-			info.GroupRatio = *userSpecialRatio
-			info.UserSpecialRatio = *userSpecialRatio
+	if ratio, ok := userSpecialRatios[usingGroup]; ok {
+		if ValidRatioValue(ratio) {
+			info.GroupRatio = ratio
+			info.UserSpecialRatio = ratio
 			info.HasUserSpecialRatio = true
 			return info
 		}
-		common.SysError(fmt.Sprintf("ignored invalid user special ratio %v (user group %q, using group %q)", *userSpecialRatio, userGroup, usingGroup))
+		common.SysError(fmt.Sprintf("ignored invalid user special ratio %v for using group %q (user group %q)", ratio, usingGroup, userGroup))
 	}
 	if ratio, ok := GetGroupGroupRatio(userGroup, usingGroup); ok {
 		info.GroupRatio = ratio

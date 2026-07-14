@@ -136,14 +136,14 @@ export interface ManageUserQuotaPayload {
 }
 
 /**
- * Set (or clear) a user's exclusive group ratio.
- * group_ratio null clears the override (falls back to the group ratio);
- * a number sets the per-user ratio (0 = free).
+ * Set (or clear) a user's exclusive group ratios.
+ * group_ratio is the full "using group -> ratio" map (overwrites existing);
+ * null or {} clears all overrides. A ratio of 0 means free.
  */
 export interface ManageUserGroupRatioPayload {
   id: number
   action: 'set_group_ratio'
-  group_ratio: number | null
+  group_ratio: Record<string, number> | null
 }
 
 // ============================================================================

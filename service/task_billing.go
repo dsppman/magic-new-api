@@ -287,7 +287,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 
 	// 获取用户和组的倍率信息
 	group := task.Group
-	var userSpecialRatio *float64
+	var userSpecialRatio map[string]float64
 	if user, err := model.GetUserById(task.UserId, false); err == nil {
 		if group == "" {
 			group = user.Group
