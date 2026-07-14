@@ -37,29 +37,29 @@ interface UserGroupRatioDialogProps {
 
 export function UserGroupRatioDialog(props: UserGroupRatioDialogProps) {
   const { t } = useTranslation()
-  const [value, setValue] = useState('')
+  const [ratio, setRatio] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const isEdit = props.currentRatio !== null
 
   // Seed the input with the current ratio each time the dialog opens.
   useEffect(() => {
     if (props.open) {
-      setValue(props.currentRatio === null ? '' : String(props.currentRatio))
+      setRatio(props.currentRatio === null ? '' : String(props.currentRatio))
     }
   }, [props.open, props.currentRatio])
 
-  const submit = async (ratio: number | null) => {
+  const submit = async (value: number | null) => {
     setLoading(true)
     try {
       const result = await adjustUserGroupRatio({
         id: props.userId,
         action: 'set_group_ratio',
-        group_ratio: ratio,
+        group_ratio: value,
       })
       if (result.success) {
         toast.success(
-          ratio === null
-            ? t('Ratio cleared')
-            : t('Ratio updated successfully')
+          value === null ? t('Ratio cleared') : t('Ratio updated successfully')
         )
         props.onOpenChange(false)
         props.onSuccess()
@@ -73,19 +73,15 @@ export function UserGroupRatioDialog(props: UserGroupRatioDialogProps) {
     }
   }
 
-  const handleConfirm = () => {
-    const trimmed = value.trim()
-    // Empty input clears the exclusive ratio (falls back to the group ratio).
-    if (trimmed === '') {
-      submit(null)
-      return
-    }
-    const ratio = Number(trimmed)
-    if (!Number.isFinite(ratio) || ratio < 0) {
+  const handleSave = () => {
+    const trimmed = ratio.trim()
+    if (trimmed === '') return
+    const value = Number.parseFloat(trimmed)
+    if (!Number.isFinite(value) || value < 0) {
       toast.error(t('Ratio must be a number not less than 0'))
       return
     }
-    submit(ratio)
+    submit(value)
   }
 
   return (
@@ -103,32 +99,43 @@ export function UserGroupRatioDialog(props: UserGroupRatioDialogProps) {
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>
             {t('Cancel')}
           </Button>
-          <Button
-            variant='outline'
-            onClick={() => submit(null)}
-            disabled={loading || props.currentRatio === null}
-          >
-            {t('Clear')}
-          </Button>
-          <Button onClick={handleConfirm} disabled={loading}>
-            {loading ? t('Processing...') : t('Confirm')}
+          {isEdit && (
+            <Button
+              variant='outline'
+              onClick={() => submit(null)}
+              disabled={loading}
+            >
+              {t('Clear')}
+            </Button>
+          )}
+          <Button onClick={handleSave} disabled={loading || ratio.trim() === ''}>
+            {loading ? t('Processing...') : isEdit ? t('Update') : t('Add')}
           </Button>
         </>
       }
     >
-      <div className='space-y-2'>
-        <Label>{t('Ratio')}</Label>
-        <Input
-          type='number'
-          step={0.1}
-          min={0}
-          placeholder={t('Enter ratio (e.g. 0.8)')}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleConfirm()
-          }}
-        />
+      <div className='space-y-4 py-4'>
+        <div className='space-y-2'>
+          <Label>{t('Ratio')}</Label>
+          <Input
+            value={ratio}
+            onChange={(e) => {
+              const val = e.target.value
+              if (val === '' || !Number.isNaN(Number.parseFloat(val))) {
+                setRatio(val)
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSave()
+            }}
+            placeholder={t('Enter ratio (e.g. 0.8)')}
+          />
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'Per-user ratio that overrides the group ratio (0 = free, empty = disabled)'
+            )}
+          </p>
+        </div>
       </div>
     </Dialog>
   )
