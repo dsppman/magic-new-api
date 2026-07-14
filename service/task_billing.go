@@ -47,6 +47,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
 	}
+	if info.PriceData.GroupRatioInfo.HasUserSpecialRatio {
+		other["user_special_ratio"] = info.PriceData.GroupRatioInfo.UserSpecialRatio
+	}
 	if info.IsModelMapped {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
@@ -284,25 +287,19 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 
 	// 获取用户和组的倍率信息
 	group := task.Group
-	if group == "" {
-		user, err := model.GetUserById(task.UserId, false)
-		if err == nil {
+	var userSpecialRatio *float64
+	if user, err := model.GetUserById(task.UserId, false); err == nil {
+		if group == "" {
 			group = user.Group
 		}
+		userSpecialRatio = user.GetSetting().GroupRatio
 	}
 	if group == "" {
 		return
 	}
 
-	groupRatio := ratio_setting.GetGroupRatio(group)
-	userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-
-	var finalGroupRatio float64
-	if hasUserGroupRatio {
-		finalGroupRatio = userGroupRatio
-	} else {
-		finalGroupRatio = groupRatio
-	}
+	// 三级优先级：用户专属倍率 > 分组特殊倍率 > 普通分组倍率（任务侧用户分组与使用分组同为 task 分组）
+	finalGroupRatio := ratio_setting.GetEffectiveGroupRatioInfo(userSpecialRatio, group, group).GroupRatio
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）
 	otherMultiplier := 1.0

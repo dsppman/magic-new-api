@@ -11,6 +11,10 @@ type GroupRatioInfo struct {
 	GroupRatio        float64
 	GroupSpecialRatio float64
 	HasSpecialRatio   bool
+	// UserSpecialRatio 是用户专属倍率生效时的值（-1 表示未生效），用于日志审计。
+	UserSpecialRatio float64
+	// HasUserSpecialRatio 为 true 时表示本次计费采用了用户专属倍率（已替换分组倍率）。
+	HasUserSpecialRatio bool
 }
 
 type PriceData struct {

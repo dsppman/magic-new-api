@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/QuantumNous/new-api/constant"
 
@@ -1037,6 +1038,8 @@ type ManageRequest struct {
 	Action string `json:"action"`
 	Value  int    `json:"value"`
 	Mode   string `json:"mode"`
+	// GroupRatio 用于 set_group_ratio 操作：非 nil 时设置用户专属倍率，nil 时清除（回退到分组倍率）。
+	GroupRatio *float64 `json:"group_ratio"`
 }
 
 // ManageUser Only admin user can do this
@@ -1148,6 +1151,40 @@ func ManageUser(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 			return
 		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+		})
+		return
+	case "set_group_ratio":
+		newSetting := user.GetSetting()
+		if req.GroupRatio == nil {
+			newSetting.GroupRatio = nil
+		} else {
+			if err := ratio_setting.CheckUserSpecialRatio(*req.GroupRatio); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			ratio := *req.GroupRatio
+			newSetting.GroupRatio = &ratio
+		}
+		if err := model.UpdateUserSetting(user.Id, newSetting); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		// 失效各层缓存，确保下一次请求按新的专属倍率计费。
+		if err := model.InvalidateUserCache(user.Id); err != nil {
+			common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", user.Id, err.Error()))
+		}
+		auditRatio := "cleared"
+		if newSetting.GroupRatio != nil {
+			auditRatio = fmt.Sprintf("%v", *newSetting.GroupRatio)
+		}
+		recordManageAuditFor(c, user.Id, "user.group_ratio_set", map[string]interface{}{
+			"username":    user.Username,
+			"id":          user.Id,
+			"group_ratio": auditRatio,
+		})
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",
@@ -1444,6 +1481,8 @@ func UpdateUserSetting(c *gin.Context) {
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,
 		AcceptUnsetRatioModel:            req.AcceptUnsetModelRatioModel,
 		RecordIpLog:                      req.RecordIpLog,
+		// 专属分组倍率仅管理员可改，用户保存自身设置时必须原样保留，避免被清空。
+		GroupRatio: existingSettings.GroupRatio,
 	}
 
 	// 如果是webhook类型,添加webhook相关设置

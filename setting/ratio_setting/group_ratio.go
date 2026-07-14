@@ -3,11 +3,17 @@ package ratio_setting
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/types"
 )
+
+// MaxUserSpecialRatio 是用户专属倍率允许的上界。倍率最终经 decimal 乘入 32 位额度列，
+// 溢出会被饱和转换拦截并记日志，这里再加一道防御上界以拒绝明显的误配置。
+const MaxUserSpecialRatio = 100000
 
 var defaultGroupRatio = map[string]float64{
 	"default": 1,
@@ -83,6 +89,51 @@ func GetGroupRatio(name string) float64 {
 		return 1
 	}
 	return ratio
+}
+
+// ValidRatioValue 判断 r 是否为可用倍率：有限且不小于 0。允许 0（表示免费），与分组倍率语义一致。
+func ValidRatioValue(r float64) bool {
+	return !math.IsNaN(r) && !math.IsInf(r, 0) && r >= 0
+}
+
+// CheckUserSpecialRatio 校验管理员设置的用户专属倍率：必须有限、不小于 0，且不超过上界。
+func CheckUserSpecialRatio(ratio float64) error {
+	if !ValidRatioValue(ratio) {
+		return errors.New("user special ratio must be a finite number not less than 0")
+	}
+	if ratio > MaxUserSpecialRatio {
+		return fmt.Errorf("user special ratio must not exceed %d", MaxUserSpecialRatio)
+	}
+	return nil
+}
+
+// GetEffectiveGroupRatioInfo 按三级优先级解析本次请求的分组倍率：
+// 用户专属倍率（最高） > 分组特殊倍率(GroupGroupRatio) > 普通分组倍率(GroupRatio)。
+// userSpecialRatio 为用户专属倍率（未设置时为 nil）；若存储值非法（负数/NaN/Inf）则忽略并回退，
+// 确保错误配置永远不会算出负额度（credit）。usingGroup 应为已完成 auto 分组解析后的最终分组。
+func GetEffectiveGroupRatioInfo(userSpecialRatio *float64, userGroup, usingGroup string) types.GroupRatioInfo {
+	info := types.GroupRatioInfo{
+		GroupRatio:        1.0,
+		GroupSpecialRatio: -1,
+		UserSpecialRatio:  -1,
+	}
+	if userSpecialRatio != nil {
+		if ValidRatioValue(*userSpecialRatio) {
+			info.GroupRatio = *userSpecialRatio
+			info.UserSpecialRatio = *userSpecialRatio
+			info.HasUserSpecialRatio = true
+			return info
+		}
+		common.SysError(fmt.Sprintf("ignored invalid user special ratio %v (user group %q, using group %q)", *userSpecialRatio, userGroup, usingGroup))
+	}
+	if ratio, ok := GetGroupGroupRatio(userGroup, usingGroup); ok {
+		info.GroupRatio = ratio
+		info.GroupSpecialRatio = ratio
+		info.HasSpecialRatio = true
+		return info
+	}
+	info.GroupRatio = GetGroupRatio(usingGroup)
+	return info
 }
 
 func GetGroupGroupRatio(userGroup, usingGroup string) (float64, bool) {

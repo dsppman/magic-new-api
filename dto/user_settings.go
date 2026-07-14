@@ -16,6 +16,7 @@ type UserSetting struct {
 	SidebarModules                   string  `json:"sidebar_modules,omitempty"`                      // SidebarModules 左侧边栏模块配置
 	BillingPreference                string  `json:"billing_preference,omitempty"`                   // BillingPreference 扣费策略（订阅/钱包）
 	Language                         string  `json:"language,omitempty"`                             // Language 用户语言偏好 (zh, en)
+	GroupRatio                       *float64 `json:"group_ratio,omitempty"`                         // GroupRatio 用户专属分组倍率（仅管理员可设置）；非 nil 时以最高优先级替换分组倍率，0 表示免费。nil 表示未设置
 }
 
 var (
