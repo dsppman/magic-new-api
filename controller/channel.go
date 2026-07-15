@@ -81,12 +81,33 @@ func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
 	return query
 }
 
-func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm.DB {
+// publicChannelTag is the only channel tag a restricted viewer may see.
+const publicChannelTag = "public"
+
+// channelViewerRestrictedToPublic reports whether the current viewer may only
+// see public-tagged channels with their upstream URL masked. Only root sees
+// every channel; the admin role (which reaches these routes via ChannelRead)
+// is restricted.
+func channelViewerRestrictedToPublic(c *gin.Context) bool {
+	return c.GetInt("role") < common.RoleRootUser
+}
+
+// maskChannelBaseURL blanks the upstream base URL so a restricted viewer never
+// receives it.
+func maskChannelBaseURL(channel *model.Channel) {
+	empty := ""
+	channel.BaseURL = &empty
+}
+
+func buildChannelListQuery(group string, statusFilter int, typeFilter int, restrictPublic bool) *gorm.DB {
 	query := model.DB.Model(&model.Channel{})
 	query = model.ApplyChannelGroupFilter(query, group)
 	query = applyChannelStatusFilter(query, statusFilter)
 	if typeFilter >= 0 {
 		query = query.Where("type = ?", typeFilter)
+	}
+	if restrictPublic {
+		query = query.Where("tag = ?", publicChannelTag)
 	}
 	return query
 }
@@ -118,14 +139,16 @@ func GetAllChannels(c *gin.Context) {
 
 	var total int64
 
+	restrictPublic := channelViewerRestrictedToPublic(c)
+
 	if enableTagMode {
-		tags, err := model.GetPaginatedChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+		tags, err := model.GetPaginatedChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter, restrictPublic), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 		if err != nil {
 			common.SysError("failed to get paginated tags: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取标签失败，请稍后重试"})
 			return
 		}
-		total, err = model.CountChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter))
+		total, err = model.CountChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter, restrictPublic))
 		if err != nil {
 			common.SysError("failed to count tags: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取标签数量失败，请稍后重试"})
@@ -136,7 +159,7 @@ func GetAllChannels(c *gin.Context) {
 				continue
 			}
 			var tagChannels []*model.Channel
-			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter).Where("tag = ?", *tag)).
+			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter, restrictPublic).Where("tag = ?", *tag)).
 				Omit("key").
 				Find(&tagChannels).Error
 			if err != nil {
@@ -147,13 +170,13 @@ func GetAllChannels(c *gin.Context) {
 			channelData = append(channelData, tagChannels...)
 		}
 	} else {
-		if err := buildChannelListQuery(groupFilter, statusFilter, typeFilter).Count(&total).Error; err != nil {
+		if err := buildChannelListQuery(groupFilter, statusFilter, typeFilter, restrictPublic).Count(&total).Error; err != nil {
 			common.SysError("failed to count channels: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道数量失败，请稍后重试"})
 			return
 		}
 
-		err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter)).
+		err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter, restrictPublic)).
 			Limit(pageInfo.GetPageSize()).
 			Offset(pageInfo.GetStartIdx()).
 			Omit("key").
@@ -167,9 +190,12 @@ func GetAllChannels(c *gin.Context) {
 
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
+		if restrictPublic {
+			maskChannelBaseURL(datum)
+		}
 	}
 
-	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1)
+	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1, restrictPublic)
 	var results []struct {
 		Type  int64
 		Count int64
@@ -287,7 +313,7 @@ func SearchChannels(c *gin.Context) {
 		for _, tag := range tags {
 			if tag != nil && *tag != "" {
 				var tagChannels []*model.Channel
-				err := sortOptions.Apply(buildChannelListQuery(group, -1, -1).Where("tag = ?", *tag)).
+				err := sortOptions.Apply(buildChannelListQuery(group, -1, -1, false).Where("tag = ?", *tag)).
 					Omit("key").
 					Find(&tagChannels).Error
 				if err != nil {
@@ -310,6 +336,17 @@ func SearchChannels(c *gin.Context) {
 			return
 		}
 		channelData = channels
+	}
+
+	restrictPublic := channelViewerRestrictedToPublic(c)
+	if restrictPublic {
+		publicOnly := make([]*model.Channel, 0, len(channelData))
+		for _, ch := range channelData {
+			if ch.GetTag() == publicChannelTag {
+				publicOnly = append(publicOnly, ch)
+			}
+		}
+		channelData = publicOnly
 	}
 
 	if statusFilter == common.ChannelStatusEnabled || statusFilter == 0 {
@@ -373,6 +410,9 @@ func SearchChannels(c *gin.Context) {
 
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
+		if restrictPublic {
+			maskChannelBaseURL(datum)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -400,6 +440,13 @@ func GetChannel(c *gin.Context) {
 	}
 	if channel != nil {
 		clearChannelInfo(channel)
+	}
+	if channelViewerRestrictedToPublic(c) {
+		if channel == nil || channel.GetTag() != publicChannelTag {
+			common.ApiError(c, gorm.ErrRecordNotFound)
+			return
+		}
+		maskChannelBaseURL(channel)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

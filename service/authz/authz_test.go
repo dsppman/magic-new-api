@@ -47,8 +47,8 @@ func TestInitSeedsBuiltInRolesAndPoliciesOnce(t *testing.T) {
 
 	assert.True(t, Can(1, common.RoleRootUser, ChannelSensitiveWrite))
 	assert.True(t, Can(2, common.RoleAdminUser, ChannelRead))
-	assert.True(t, Can(2, common.RoleAdminUser, ChannelOperate))
-	assert.True(t, Can(2, common.RoleAdminUser, ChannelWrite))
+	assert.False(t, Can(2, common.RoleAdminUser, ChannelOperate))
+	assert.False(t, Can(2, common.RoleAdminUser, ChannelWrite))
 	assert.False(t, Can(2, common.RoleAdminUser, ChannelSensitiveWrite))
 	assert.False(t, Can(3, common.RoleCommonUser, ChannelRead))
 }
@@ -108,8 +108,8 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 	}, ExplicitUserPermissions(42))
 	assert.Equal(t, PermissionsMap{
 		ResourceChannel: {
+			ActionOperate:        true,
 			ActionSensitiveWrite: true,
-			ActionWrite:          false,
 		},
 	}, ExplicitUserOverrides(42))
 
@@ -117,10 +117,12 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 	require.NoError(t, db.Model(&model.CasbinRule{}).Where("v0 = ?", UserSubject(42)).Count(&userPolicyCount).Error)
 	assert.Equal(t, int64(2), userPolicyCount)
 
+	// Setting the user's permissions to exactly the admin role baseline (channel
+	// read only) stores no overrides.
 	require.NoError(t, SetUserPermissions(42, PermissionsMap{ResourceChannel: {
 		ActionRead:           true,
-		ActionOperate:        true,
-		ActionWrite:          true,
+		ActionOperate:        false,
+		ActionWrite:          false,
 		ActionSensitiveWrite: false,
 		ActionSecretView:     false,
 	}}))
@@ -128,8 +130,8 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 	assert.Equal(t, PermissionsMap{
 		ResourceChannel: {
 			ActionRead:           true,
-			ActionOperate:        true,
-			ActionWrite:          true,
+			ActionOperate:        false,
+			ActionWrite:          false,
 			ActionSensitiveWrite: false,
 			ActionSecretView:     false,
 		},
@@ -153,7 +155,7 @@ func TestClearUserAuthorizationRemovesOverrides(t *testing.T) {
 
 	assert.Empty(t, ExplicitUserOverrides(90))
 	assert.True(t, Can(90, common.RoleAdminUser, ChannelRead))
-	assert.True(t, Can(90, common.RoleAdminUser, ChannelWrite))
+	assert.False(t, Can(90, common.RoleAdminUser, ChannelWrite))
 	assert.False(t, Can(90, common.RoleAdminUser, ChannelSensitiveWrite))
 	assert.False(t, Can(90, common.RoleCommonUser, ChannelRead))
 }
@@ -222,8 +224,8 @@ func TestCapabilitiesUseCatalogShape(t *testing.T) {
 	capabilities := Capabilities(7, common.RoleAdminUser)
 
 	assert.True(t, capabilities[ResourceChannel][ActionRead])
-	assert.True(t, capabilities[ResourceChannel][ActionOperate])
-	assert.True(t, capabilities[ResourceChannel][ActionWrite])
+	assert.False(t, capabilities[ResourceChannel][ActionOperate])
+	assert.False(t, capabilities[ResourceChannel][ActionWrite])
 	assert.False(t, capabilities[ResourceChannel][ActionSensitiveWrite])
 	assert.False(t, capabilities[ResourceChannel][ActionSecretView])
 }
