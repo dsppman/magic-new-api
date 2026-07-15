@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/service/authz"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -92,11 +93,25 @@ func channelViewerRestrictedToPublic(c *gin.Context) bool {
 	return c.GetInt("role") < common.RoleRootUser
 }
 
-// maskChannelBaseURL blanks the upstream base URL so a restricted viewer never
-// receives it.
-func maskChannelBaseURL(channel *model.Channel) {
+// adminChannelUsedQuotaRatio scales the used quota shown to a restricted
+// (non-root) viewer. Display-only: it never feeds back into billing.
+const adminChannelUsedQuotaRatio = 0.85
+
+// applyRestrictedChannelView rewrites a channel in place for a restricted
+// (non-root) viewer: the upstream base URL is blanked and the displayed used
+// quota is scaled down by adminChannelUsedQuotaRatio. Callers pass channels
+// already limited to the public tag.
+//
+// UsedQuota is an int64 column shown for information only here, so the int32
+// saturating helpers in common/quota_math.go (meant for billing charges written
+// to int32 quota columns) deliberately do not apply; a decimal multiply keeps
+// the full int64 range and truncates toward zero.
+func applyRestrictedChannelView(channel *model.Channel) {
 	empty := ""
 	channel.BaseURL = &empty
+	channel.UsedQuota = decimal.NewFromInt(channel.UsedQuota).
+		Mul(decimal.NewFromFloat(adminChannelUsedQuotaRatio)).
+		IntPart()
 }
 
 func buildChannelListQuery(group string, statusFilter int, typeFilter int, restrictPublic bool) *gorm.DB {
@@ -191,7 +206,7 @@ func GetAllChannels(c *gin.Context) {
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 		if restrictPublic {
-			maskChannelBaseURL(datum)
+			applyRestrictedChannelView(datum)
 		}
 	}
 
@@ -411,7 +426,7 @@ func SearchChannels(c *gin.Context) {
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 		if restrictPublic {
-			maskChannelBaseURL(datum)
+			applyRestrictedChannelView(datum)
 		}
 	}
 
@@ -446,7 +461,7 @@ func GetChannel(c *gin.Context) {
 			common.ApiError(c, gorm.ErrRecordNotFound)
 			return
 		}
-		maskChannelBaseURL(channel)
+		applyRestrictedChannelView(channel)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

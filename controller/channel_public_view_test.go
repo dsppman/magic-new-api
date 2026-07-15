@@ -15,16 +15,25 @@ import (
 // channelView is a minimal projection of the channel JSON the read endpoints
 // return, limited to the fields the public-view restriction governs.
 type channelView struct {
-	Id      int     `json:"id"`
-	Name    string  `json:"name"`
-	Tag     *string `json:"tag"`
-	BaseURL *string `json:"base_url"`
+	Id        int     `json:"id"`
+	Name      string  `json:"name"`
+	Tag       *string `json:"tag"`
+	BaseURL   *string `json:"base_url"`
+	UsedQuota int64   `json:"used_quota"`
 }
 
 func channelTagPtr(s string) *string { return &s }
 
+// publicChannelUsedQuota deliberately exceeds math.MaxInt32 so the scaling test
+// also guards against a regression to an int32-saturating conversion.
+const (
+	publicChannelUsedQuota   = int64(10_000_000_000)
+	publicChannelScaledQuota = int64(8_500_000_000) // 10e9 * 0.85
+	privateChannelUsedQuota  = int64(2_000_000_000)
+)
+
 // seedPublicViewChannels installs one public-tagged channel plus a private and
-// an untagged channel, each with a distinct upstream URL.
+// an untagged channel, each with a distinct upstream URL and used quota.
 func seedPublicViewChannels(t *testing.T) {
 	t.Helper()
 	setupModelListControllerTestDB(t)
@@ -34,10 +43,12 @@ func seedPublicViewChannels(t *testing.T) {
 	require.NoError(t, model.DB.Create(&model.Channel{
 		Id: 1, Name: "public-ch", Group: "default",
 		Tag: channelTagPtr(publicChannelTag), BaseURL: &publicURL,
+		UsedQuota: publicChannelUsedQuota,
 	}).Error)
 	require.NoError(t, model.DB.Create(&model.Channel{
 		Id: 2, Name: "private-ch", Group: "default",
 		Tag: channelTagPtr("private"), BaseURL: &privateURL,
+		UsedQuota: privateChannelUsedQuota,
 	}).Error)
 	require.NoError(t, model.DB.Create(&model.Channel{
 		Id: 3, Name: "untagged-ch", Group: "default",
@@ -96,6 +107,7 @@ func TestGetAllChannelsAdminSeesOnlyPublicWithMaskedURL(t *testing.T) {
 	assert.Equal(t, "public-ch", items[0].Name)
 	require.NotNil(t, items[0].BaseURL)
 	assert.Equal(t, "", *items[0].BaseURL, "restricted viewer must not receive the upstream URL")
+	assert.Equal(t, publicChannelScaledQuota, items[0].UsedQuota, "restricted viewer sees used quota scaled by 0.85")
 }
 
 func TestGetAllChannelsRootSeesAllWithRealURL(t *testing.T) {
@@ -104,14 +116,16 @@ func TestGetAllChannelsRootSeesAllWithRealURL(t *testing.T) {
 	items := listChannels(t, common.RoleRootUser)
 
 	require.Len(t, items, 3)
-	urls := map[string]string{}
+	byName := map[string]channelView{}
 	for _, ch := range items {
 		require.NotNil(t, ch.BaseURL)
-		urls[ch.Name] = *ch.BaseURL
+		byName[ch.Name] = ch
 	}
-	assert.Equal(t, "https://public.example.com", urls["public-ch"])
-	assert.Equal(t, "https://private.example.com", urls["private-ch"])
-	assert.Equal(t, "https://untagged.example.com", urls["untagged-ch"])
+	assert.Equal(t, "https://public.example.com", *byName["public-ch"].BaseURL)
+	assert.Equal(t, "https://private.example.com", *byName["private-ch"].BaseURL)
+	assert.Equal(t, "https://untagged.example.com", *byName["untagged-ch"].BaseURL)
+	assert.Equal(t, publicChannelUsedQuota, byName["public-ch"].UsedQuota, "root sees the real used quota")
+	assert.Equal(t, privateChannelUsedQuota, byName["private-ch"].UsedQuota)
 }
 
 func TestGetChannelAdminPublicMasksURL(t *testing.T) {
@@ -123,6 +137,7 @@ func TestGetChannelAdminPublicMasksURL(t *testing.T) {
 	require.NotNil(t, ch)
 	require.NotNil(t, ch.BaseURL)
 	assert.Equal(t, "", *ch.BaseURL)
+	assert.Equal(t, publicChannelScaledQuota, ch.UsedQuota)
 }
 
 func TestGetChannelAdminNonPublicIsHidden(t *testing.T) {
@@ -142,4 +157,5 @@ func TestGetChannelRootSeesRealURL(t *testing.T) {
 	require.NotNil(t, ch)
 	require.NotNil(t, ch.BaseURL)
 	assert.Equal(t, "https://private.example.com", *ch.BaseURL)
+	assert.Equal(t, privateChannelUsedQuota, ch.UsedQuota)
 }
