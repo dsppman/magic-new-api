@@ -350,7 +350,7 @@ export function UsersMutateDrawer({
               </SideDrawerSection>
 
               {/* Group & Quota Settings (Update only) */}
-              {isUpdate && (
+              {currentRow && (
                 <SideDrawerSection>
                   <h3 className='text-sm font-medium'>{t('Group & Quota')}</h3>
 
@@ -430,7 +430,7 @@ export function UsersMutateDrawer({
                   />
 
                   <UserGroupRatioOverrides
-                    userId={currentRow!.id}
+                    userId={currentRow.id}
                     groups={groups}
                     overrides={form.watch('group_ratio') ?? {}}
                     onSaved={refreshUserData}
