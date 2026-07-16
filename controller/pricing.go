@@ -35,32 +35,28 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 
 func GetPricing(c *gin.Context) {
 	pricing := model.GetPricing()
-	userId, exists := c.Get("id")
-	usableGroup := map[string]string{}
-	groupRatio := map[string]float64{}
-	for s, f := range ratio_setting.GetGroupRatioCopy() {
-		groupRatio[s] = f
-	}
 	var group string
-	if exists {
+	var userSpecialRatios map[string]float64
+	if userId, exists := c.Get("id"); exists {
 		user, err := model.GetUserCache(userId.(int))
 		if err == nil {
 			group = user.Group
-			for g := range groupRatio {
-				ratio, ok := ratio_setting.GetGroupGroupRatio(group, g)
-				if ok {
-					groupRatio[g] = ratio
-				}
-			}
+			userSpecialRatios = user.GetSetting().GroupRatio
 		}
 	}
 
-	usableGroup = service.GetUserUsableGroups(group)
+	groupRatio := map[string]float64{}
+	for g := range ratio_setting.GetGroupRatioCopy() {
+		// 与计费一致的三级优先级：用户专属倍率 > 分组特殊倍率 > 普通分组倍率
+		groupRatio[g] = ratio_setting.GetEffectiveGroupRatioInfo(userSpecialRatios, group, g).GroupRatio
+	}
+
+	usableGroup := service.GetUserUsableGroups(group)
 	pricing = filterPricingByUsableGroups(pricing, usableGroup)
 	// check groupRatio contains usableGroup
-	for group := range ratio_setting.GetGroupRatioCopy() {
-		if _, ok := usableGroup[group]; !ok {
-			delete(groupRatio, group)
+	for g := range groupRatio {
+		if _, ok := usableGroup[g]; !ok {
+			delete(groupRatio, g)
 		}
 	}
 
